@@ -19,7 +19,7 @@ const drive = createDrive({
 });
 const LS = {
   updated: "hestia-updated-at", synced: "hestia-synced-at", file: "hestia-drive-file-id",
-  folderId: "hestia-drive-folder-id", folderName: "hestia-drive-folder-name",
+  folderId: "hestia-drive-folder-id", folderName: "hestia-drive-folder-name", picked: "hestia-drive-file-picked",
 };
 const lsGet = (k) => { try { return localStorage.getItem(k); } catch (e) { return null; } };
 const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch (e) { /* ignore */ } };
@@ -27,6 +27,7 @@ const lsDel = (k) => { try { localStorage.removeItem(k); } catch (e) { /* ignore
 let driveFileId = lsGet(LS.file);
 let driveFolder = lsGet(LS.folderId) ? { id: lsGet(LS.folderId), name: lsGet(LS.folderName) || "Hestia" } : null;
 let pushTimer = null;
+let lastSyncAt = null; // when this session last confirmed Drive and this browser agree
 
 const VIEW_KEY = "hestia-view";
 let viewMode = "percent"; // "percent" | "dollar": which column of each category row is editable
@@ -64,7 +65,8 @@ function renderDriveUI(message) {
   const linked = !!driveFileId;
   const live = linked && drive.isConnected();
   const where = driveFolder ? ` · in “${driveFolder.name}”` : "";
-  driveEls.status.textContent = message || (live ? `☁ Synced${where}` : linked ? "Drive linked — sign in to sync" : "");
+  const when = lastSyncAt ? ` ${lastSyncAt.toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" })}` : "";
+  driveEls.status.textContent = message || (live ? `☁ Synced${when}${where}` : linked ? "Drive linked — sign in to sync" : "");
   driveEls.folder.classList.toggle("hidden", !live);
   driveEls.btn.textContent = live ? "Sync now" : linked ? "Sign in & sync" : "Connect Google Drive";
   driveEls.off.classList.toggle("hidden", !linked);
@@ -88,6 +90,7 @@ async function pushNow() {
   try {
     await drive.write(driveFileId, serializeState({ scenarios, updatedAt: stamp }));
     lsSet(LS.synced, String(stamp));
+    lastSyncAt = new Date();
     renderDriveUI();
   } catch (e) { handleDriveError(e); }
 }
@@ -130,7 +133,9 @@ async function resolveDriveFile() {
   }
   const create = confirm("No Hestia file found in your Google Drive yet.\n\nOK = create one (in a “Hestia” folder) from this browser's scenarios.\nCancel = pick an existing file instead.");
   if (create) return drive.create("", undefined, (await ensureDriveFolder()).id);
-  return drive.pick(driveFolder && driveFolder.id);
+  const picked = await drive.pick(driveFolder && driveFolder.id);
+  if (picked) lsSet(LS.picked, "1"); // leave a hand-picked file where the user keeps it
+  return picked;
 }
 
 async function syncWithDrive(retried = false) {
@@ -144,6 +149,11 @@ async function syncWithDrive(retried = false) {
       driveFileId = file.id;
       lsSet(LS.file, file.id);
     }
+    // A file linked before folders existed (or at the top level of Drive) gets
+    // tidied into the Hestia folder — unless the user picked it themselves.
+    if (!driveFolder && lsGet(LS.picked) !== "1") {
+      await drive.move(driveFileId, (await ensureDriveFolder()).id);
+    }
     const remote = parseState(await drive.read(driveFileId));
     let action = decideSync({
       localUpdatedAt: localUpdatedAt(),
@@ -154,9 +164,9 @@ async function syncWithDrive(retried = false) {
     if (action === "conflict") {
       action = confirm("Both this browser and Google Drive have changes since the last sync.\n\nOK = keep this browser's version (overwrites Drive).\nCancel = use Drive's version (replaces what's here).") ? "push" : "pull";
     }
-    if (action === "pull") { applyPull(remote); renderDriveUI(); }
+    if (action === "pull") { applyPull(remote); lastSyncAt = new Date(); renderDriveUI(); }
     else if (action === "push") await pushNow();
-    else { lsSet(LS.synced, String(localUpdatedAt())); renderDriveUI(); }
+    else { lsSet(LS.synced, String(localUpdatedAt())); lastSyncAt = new Date(); renderDriveUI(); }
   } catch (e) {
     // The linked file or folder is gone (deleted in Drive): unlink and look again / recreate.
     if (e.status === 404 && !fresh && !retried) {
@@ -190,6 +200,8 @@ driveEls.off.addEventListener("click", () => {
   driveFileId = null;
   lsDel(LS.file);
   lsDel(LS.synced);
+  lsDel(LS.picked);
+  lastSyncAt = null;
   setDriveFolder(null);
   renderDriveUI("Disconnected (your scenarios stay in this browser and in the Drive file)");
 });

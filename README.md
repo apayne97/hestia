@@ -12,7 +12,9 @@ browser's `localStorage`.
 - `budget.js` — presets, allocation and rent rules of thumb. Pure functions.
 - `app.js` — UI. `index.html` / `style.css` / `theme.js` — shell.
 
-Run locally: `python3 -m http.server 8935`, then open http://localhost:8935.
+Run locally: `python3 devserver.py` (serves http://localhost:4461 with caching
+disabled), then open http://localhost:4461. Use that exact origin: it is the one
+authorized for Google sign-in.
 Tests: `npm test` (Node's built-in runner, no install needed).
 
 ## Google Drive sync (optional)
