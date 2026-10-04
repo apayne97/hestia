@@ -418,6 +418,9 @@ root.addEventListener("click", (e) => {
     const src = scenarios[i];
     scenarios.splice(i + 1, 0, Budget.createScenario({ ...src, name: src.name + " copy", percents: { ...src.percents }, locked: { ...src.locked } }));
   } else if (scenarios.length > 1) {
+    const name = scenarios[i].name || "this scenario";
+    const syncNote = driveFileId ? " It will also be removed from Google Drive on the next sync." : "";
+    if (!confirm(`Delete “${name}”?${syncNote}`)) return;
     scenarios.splice(i, 1);
   }
   save();
