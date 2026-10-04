@@ -331,7 +331,11 @@ function refresh(card, s) {
     const locked = !!s.locked[r.id];
     row.classList.toggle("locked", locked);
     const lockBtn = row.querySelector(".lock");
-    lockBtn.innerHTML = locked ? LOCK_ICON : UNLOCK_ICON;
+    // only swap the icon when the state changes, so a refresh can't replace the <svg> between mousedown and mouseup
+    if (lockBtn.dataset.state !== String(locked)) {
+      lockBtn.innerHTML = locked ? LOCK_ICON : UNLOCK_ICON;
+      lockBtn.dataset.state = String(locked);
+    }
     lockBtn.setAttribute("aria-pressed", String(locked));
     slider.disabled = locked;
     pctIn.readOnly = dollar || locked;
@@ -391,21 +395,12 @@ root.addEventListener("change", (e) => {
   const s = find(e.target.closest(".card"));
   s.percents = { ...Budget.PRESETS[e.target.value] };
   save();
-  function setView(mode) {
-  viewMode = mode;
-  try { localStorage.setItem(VIEW_KEY, mode); } catch (e) { /* ignore */ }
-  for (const btn of root.querySelectorAll("[data-view]")) btn.setAttribute("aria-pressed", String(btn.dataset.view === mode));
-  for (const card of root.children) refresh(card, find(card));
-}
-// the toggle lives in every card's column headings; all of them stay in step
-root.addEventListener("click", (e) => { if (e.target.dataset.view) setView(e.target.dataset.view); });
-
-render();
-setView(viewMode);
+  render();
 });
 
 root.addEventListener("click", (e) => {
-  const action = e.target.dataset.action;
+  const actionEl = e.target.closest("[data-action]"); // a click on the icon's <svg> must still count
+  const action = actionEl && actionEl.dataset.action;
   const card = e.target.closest(".card");
   if (action === "lock" && card) {
     const s = find(card);
@@ -428,33 +423,13 @@ root.addEventListener("click", (e) => {
     scenarios.splice(i, 1);
   }
   save();
-  function setView(mode) {
-  viewMode = mode;
-  try { localStorage.setItem(VIEW_KEY, mode); } catch (e) { /* ignore */ }
-  for (const btn of root.querySelectorAll("[data-view]")) btn.setAttribute("aria-pressed", String(btn.dataset.view === mode));
-  for (const card of root.children) refresh(card, find(card));
-}
-// the toggle lives in every card's column headings; all of them stay in step
-root.addEventListener("click", (e) => { if (e.target.dataset.view) setView(e.target.dataset.view); });
-
-render();
-setView(viewMode);
+  render();
 });
 
 document.getElementById("addScenario").addEventListener("click", () => {
   scenarios.push(Budget.createScenario({ name: `Scenario ${scenarios.length + 1}` }));
   save();
-  function setView(mode) {
-  viewMode = mode;
-  try { localStorage.setItem(VIEW_KEY, mode); } catch (e) { /* ignore */ }
-  for (const btn of root.querySelectorAll("[data-view]")) btn.setAttribute("aria-pressed", String(btn.dataset.view === mode));
-  for (const card of root.children) refresh(card, find(card));
-}
-// the toggle lives in every card's column headings; all of them stay in step
-root.addEventListener("click", (e) => { if (e.target.dataset.view) setView(e.target.dataset.view); });
-
-render();
-setView(viewMode);
+  render();
 });
 
 function setView(mode) {
@@ -464,7 +439,10 @@ function setView(mode) {
   for (const card of root.children) refresh(card, find(card));
 }
 // the toggle lives in every card's column headings; all of them stay in step
-root.addEventListener("click", (e) => { if (e.target.dataset.view) setView(e.target.dataset.view); });
+root.addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-view]");
+  if (btn) setView(btn.dataset.view);
+});
 
 render();
 setView(viewMode);
