@@ -22,6 +22,9 @@ const PRESETS = {
 };
 const DEFAULT_PRESET = "50/30/20";
 
+// Biweekly pay: 26 paychecks a year (not 24, and not 12 x 2).
+const PAY_PERIODS_PER_YEAR = 26;
+
 let nextId = 1;
 function createScenario(overrides = {}) {
   return {
@@ -100,5 +103,5 @@ function rentRules(grossAnnual) {
   return { thirtyPercent: (gross * 0.3) / 12, fortyX: gross / 40 };
 }
 
-const Budget = { CATEGORIES, PRESETS, DEFAULT_PRESET, createScenario, allocate, rebalance, normalize, rentRules };
+const Budget = { PAY_PERIODS_PER_YEAR, CATEGORIES, PRESETS, DEFAULT_PRESET, createScenario, allocate, rebalance, normalize, rentRules };
 if (typeof module !== "undefined" && module.exports) module.exports = Budget;

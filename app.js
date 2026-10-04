@@ -238,13 +238,13 @@ function buildCard(s) {
       </div>
     </div>
     <table class="tax">
-      <thead><tr><th></th><th>Year</th><th>Month</th></tr></thead>
+      <thead><tr><th></th><th>Year</th><th>Month</th><th title="Biweekly: year ÷ 26">Paycheck</th></tr></thead>
       <tbody>
         ${[["gross", "Gross pay"], ["federal", "Federal income tax"], ["socialSecurity", "Social Security"],
            ["medicare", "Medicare"], ["state", "State tax"],
            ["k401", "401(k) contribution"], ["health", "Health premiums"]]
-          .map(([k, label]) => `<tr><td>${label}</td><td data-tax="${k}"></td><td data-tax-mo="${k}"></td></tr>`).join("")}
-        <tr class="total"><td>Take-home</td><td data-tax="net"></td><td data-tax-mo="net"></td></tr>
+          .map(([k, label]) => `<tr><td>${label}</td><td data-tax="${k}"></td><td data-tax-mo="${k}"></td><td data-tax-pay="${k}"></td></tr>`).join("")}
+        <tr class="total"><td>Take-home</td><td data-tax="net"></td><td data-tax-mo="net"></td><td data-tax-pay="net"></td></tr>
       </tbody>
     </table>
     <p class="muted" data-out="effective"></p>
@@ -257,7 +257,10 @@ function buildCard(s) {
       </label>
     </div>
     <div class="cats">
-      <div class="cat cat-head"><span></span><span></span><span>% of pay</span><span>$ / month</span></div>
+      <div class="cat cat-head"><span></span><span></span>
+        <span class="seg view-toggle" role="group" aria-label="Edit budget in">
+          <button type="button" data-view="percent">% of pay</button><button type="button" data-view="dollar">$ / month</button>
+        </span></div>
       ${Budget.CATEGORIES.map((c) => `
         <div class="cat" data-cat="${c.id}">
           <span class="cat-label"><button type="button" class="lock" data-action="lock" aria-label="Lock ${c.label}"></button>${c.label}</span>
@@ -309,6 +312,7 @@ function refresh(card, s) {
     const sign = k === "gross" || k === "net" ? "" : "−";
     setText(card, `[data-tax="${k}"]`, sign + money.format(t[k]));
     setText(card, `[data-tax-mo="${k}"]`, sign + money.format(t[k] / 12));
+    setText(card, `[data-tax-pay="${k}"]`, sign + money.format(t[k] / Budget.PAY_PERIODS_PER_YEAR));
   }
   setText(card, '[data-out="effective"]',
     `Effective tax rate ${pctFmt.format(t.effectiveRate * 100)}% · top federal bracket ${pctFmt.format(t.marginalFederal * 100)}% (${Tax.TAX_YEAR} rates, estimate only)`);
@@ -356,6 +360,7 @@ function refresh(card, s) {
 
 function render() {
   root.replaceChildren(...scenarios.map(buildCard));
+  for (const btn of root.querySelectorAll("[data-view]")) btn.setAttribute("aria-pressed", String(btn.dataset.view === viewMode));
 }
 
 const find = (card) => scenarios.find((s) => s.id === card.dataset.id);
@@ -386,15 +391,14 @@ root.addEventListener("change", (e) => {
   const s = find(e.target.closest(".card"));
   s.percents = { ...Budget.PRESETS[e.target.value] };
   save();
-  const viewButtons = { percent: document.getElementById("viewPercent"), dollar: document.getElementById("viewDollar") };
-function setView(mode) {
+  function setView(mode) {
   viewMode = mode;
   try { localStorage.setItem(VIEW_KEY, mode); } catch (e) { /* ignore */ }
-  for (const [m, btn] of Object.entries(viewButtons)) btn.setAttribute("aria-pressed", String(m === mode));
+  for (const btn of root.querySelectorAll("[data-view]")) btn.setAttribute("aria-pressed", String(btn.dataset.view === mode));
   for (const card of root.children) refresh(card, find(card));
 }
-viewButtons.percent.addEventListener("click", () => setView("percent"));
-viewButtons.dollar.addEventListener("click", () => setView("dollar"));
+// the toggle lives in every card's column headings; all of them stay in step
+root.addEventListener("click", (e) => { if (e.target.dataset.view) setView(e.target.dataset.view); });
 
 render();
 setView(viewMode);
@@ -424,15 +428,14 @@ root.addEventListener("click", (e) => {
     scenarios.splice(i, 1);
   }
   save();
-  const viewButtons = { percent: document.getElementById("viewPercent"), dollar: document.getElementById("viewDollar") };
-function setView(mode) {
+  function setView(mode) {
   viewMode = mode;
   try { localStorage.setItem(VIEW_KEY, mode); } catch (e) { /* ignore */ }
-  for (const [m, btn] of Object.entries(viewButtons)) btn.setAttribute("aria-pressed", String(m === mode));
+  for (const btn of root.querySelectorAll("[data-view]")) btn.setAttribute("aria-pressed", String(btn.dataset.view === mode));
   for (const card of root.children) refresh(card, find(card));
 }
-viewButtons.percent.addEventListener("click", () => setView("percent"));
-viewButtons.dollar.addEventListener("click", () => setView("dollar"));
+// the toggle lives in every card's column headings; all of them stay in step
+root.addEventListener("click", (e) => { if (e.target.dataset.view) setView(e.target.dataset.view); });
 
 render();
 setView(viewMode);
@@ -441,29 +444,27 @@ setView(viewMode);
 document.getElementById("addScenario").addEventListener("click", () => {
   scenarios.push(Budget.createScenario({ name: `Scenario ${scenarios.length + 1}` }));
   save();
-  const viewButtons = { percent: document.getElementById("viewPercent"), dollar: document.getElementById("viewDollar") };
-function setView(mode) {
+  function setView(mode) {
   viewMode = mode;
   try { localStorage.setItem(VIEW_KEY, mode); } catch (e) { /* ignore */ }
-  for (const [m, btn] of Object.entries(viewButtons)) btn.setAttribute("aria-pressed", String(m === mode));
+  for (const btn of root.querySelectorAll("[data-view]")) btn.setAttribute("aria-pressed", String(btn.dataset.view === mode));
   for (const card of root.children) refresh(card, find(card));
 }
-viewButtons.percent.addEventListener("click", () => setView("percent"));
-viewButtons.dollar.addEventListener("click", () => setView("dollar"));
+// the toggle lives in every card's column headings; all of them stay in step
+root.addEventListener("click", (e) => { if (e.target.dataset.view) setView(e.target.dataset.view); });
 
 render();
 setView(viewMode);
 });
 
-const viewButtons = { percent: document.getElementById("viewPercent"), dollar: document.getElementById("viewDollar") };
 function setView(mode) {
   viewMode = mode;
   try { localStorage.setItem(VIEW_KEY, mode); } catch (e) { /* ignore */ }
-  for (const [m, btn] of Object.entries(viewButtons)) btn.setAttribute("aria-pressed", String(m === mode));
+  for (const btn of root.querySelectorAll("[data-view]")) btn.setAttribute("aria-pressed", String(btn.dataset.view === mode));
   for (const card of root.children) refresh(card, find(card));
 }
-viewButtons.percent.addEventListener("click", () => setView("percent"));
-viewButtons.dollar.addEventListener("click", () => setView("dollar"));
+// the toggle lives in every card's column headings; all of them stay in step
+root.addEventListener("click", (e) => { if (e.target.dataset.view) setView(e.target.dataset.view); });
 
 render();
 setView(viewMode);

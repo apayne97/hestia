@@ -147,3 +147,10 @@ test("normalize with every category locked returns them unchanged (no NaN)", () 
   const p = Budget.normalize(Budget.PRESETS["50/30/20"], all);
   assert.deepEqual(p, Budget.PRESETS["50/30/20"]);
 });
+
+test("paychecks: 26 a year, so a paycheck is smaller than a month's pay", () => {
+  assert.equal(Budget.PAY_PERIODS_PER_YEAR, 26);
+  const t = Tax.estimateTax({ salary: 78000 });
+  near(78000 / Budget.PAY_PERIODS_PER_YEAR, 3000);
+  assert.ok(t.net / Budget.PAY_PERIODS_PER_YEAR < t.netMonthly);
+});
