@@ -1,0 +1,8 @@
+{
+  "name": "hestia",
+  "private": true,
+  "description": "Household budget theory — set a salary, see take-home and what each percentage slice buys. Static site, no runtime dependencies; this package.json exists only for the test script and CI.",
+  "scripts": {
+    "test": "node --test"
+  }
+}

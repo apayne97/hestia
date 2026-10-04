@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hestia</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<script>try{document.documentElement.dataset.theme=localStorage.getItem("hestia-theme")||"light";}catch(e){}</script>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top">
+  <span class="wordmark">Hestia</span>
+  <span class="tagline">household budget theory</span>
+  <span class="spacer"></span>
+  <button type="button" id="addScenario">+ Add scenario</button>
+  <button type="button" class="theme-toggle" id="themeToggle" title="Toggle light/dark"></button>
+</header>
+<main>
+  <div id="scenarios" class="scenarios"></div>
+  <p class="muted footnote">
+    Nothing here leaves your browser. Taxes are a rough estimate (standard deduction, no pre-tax
+    deductions or credits) — good for comparing offers, not for filing. Percentages are of take-home pay.
+  </p>
+</main>
+<script src="tax.js"></script>
+<script src="budget.js"></script>
+<script src="theme.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
