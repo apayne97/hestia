@@ -15,5 +15,25 @@ browser's `localStorage`.
 Run locally: `python3 -m http.server 8935`, then open http://localhost:8935.
 Tests: `npm test` (Node's built-in runner, no install needed).
 
-Roadmap: opt-in Google Drive sync (same `drive.file` pattern as lyre),
-editable categories, mobile layout.
+## Google Drive sync (optional)
+
+"Connect Google Drive" keeps all scenarios in one `hestia-scenarios.json` in
+your own Drive, so they follow you between devices. It uses the narrow
+`drive.file` scope (the app can only see files it created or you picked) and
+runs entirely in the browser. Edits auto-save ~1s after you stop typing; if
+both this browser and Drive changed since the last sync you're asked which
+version to keep. `gdrive.js` is a generic, config-driven Drive client;
+`sync.js` has the Hestia-specific file format and sync decision.
+
+It shares lyre's Google Cloud project/OAuth client, so every origin Hestia is
+served from must be added in Google Cloud Console → APIs & Services →
+Credentials: the OAuth client's **Authorized JavaScript origins** and the API
+key's **HTTP referrer** restrictions need `https://hestia.apayne.org` (and
+`http://localhost:4461` for local dev).
+
+## Branches
+
+Work on `dev`; `main` is what GitHub Pages serves and is fast-forwarded from
+`dev` once CI passes (branch protection requires the `test` check).
+
+Roadmap: editable categories, mobile layout.

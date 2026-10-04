@@ -6,6 +6,23 @@ const STORAGE_KEY = "hestia-scenarios-v1";
 const money = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 const pctFmt = new Intl.NumberFormat("en-US", { maximumFractionDigits: 1 });
 
+// Google Drive sync (opt-in). Same Google Cloud project as lyre, so the
+// origins this app is served from must be listed on that OAuth client — see
+// gdrive.js. These values are public by design (the API key is restricted
+// to our domains in the console).
+const drive = createDrive({
+  clientId: "646803858670-8r7k3h8mfgri92cqalhc8b70l3g62grd.apps.googleusercontent.com",
+  apiKey: "AIzaSyAcogjzidhCeWPLJhUlUV0oT5xM1i1Jxx8",
+  appId: "646803858670",
+  fileName: "hestia-scenarios.json",
+});
+const LS = { updated: "hestia-updated-at", synced: "hestia-synced-at", file: "hestia-drive-file-id" };
+const lsGet = (k) => { try { return localStorage.getItem(k); } catch (e) { return null; } };
+const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch (e) { /* ignore */ } };
+const lsDel = (k) => { try { localStorage.removeItem(k); } catch (e) { /* ignore */ } };
+let driveFileId = lsGet(LS.file);
+let pushTimer = null;
+
 const VIEW_KEY = "hestia-view";
 let viewMode = "percent"; // "percent" | "dollar": which column of each category row is editable
 try { if (localStorage.getItem(VIEW_KEY) === "dollar") viewMode = "dollar"; } catch (e) { /* ignore */ }
@@ -22,9 +39,97 @@ function loadScenarios() {
   return [Budget.createScenario({ name: "Scenario 1" })];
 }
 
+const localUpdatedAt = () => Number(lsGet(LS.updated)) || 0;
+
 function save() {
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(scenarios)); } catch (e) { /* private mode etc */ }
+  lsSet(LS.updated, String(Date.now()));
+  schedulePush();
 }
+
+// ---- Google Drive sync -------------------------------------------------------
+
+const driveEls = { status: document.getElementById("driveStatus"), btn: document.getElementById("driveBtn"), off: document.getElementById("driveOff") };
+
+// message overrides the default status text for the current connection state
+function renderDriveUI(message) {
+  const linked = !!driveFileId;
+  const live = linked && drive.isConnected();
+  driveEls.status.textContent = message || (live ? "☁ Synced" : linked ? "Drive linked — sign in to sync" : "");
+  driveEls.btn.textContent = live ? "Sync now" : linked ? "Sign in & sync" : "Connect Google Drive";
+  driveEls.off.classList.toggle("hidden", !linked);
+}
+
+function handleDriveError(e, { forgetFile = false } = {}) {
+  if (forgetFile) { driveFileId = null; lsDel(LS.file); }
+  renderDriveUI(e instanceof DriveAuthError ? "Google sign-in expired — click to reconnect" : `Drive: ${e.message}`);
+}
+
+function schedulePush() {
+  if (!driveFileId || !drive.isConnected()) { if (driveFileId) renderDriveUI("Drive linked — changes not synced yet"); return; }
+  clearTimeout(pushTimer);
+  pushTimer = setTimeout(pushNow, 1000);
+}
+
+async function pushNow() {
+  let stamp = localUpdatedAt();
+  if (!stamp) { stamp = Date.now(); lsSet(LS.updated, String(stamp)); }
+  renderDriveUI("Saving to Drive…");
+  try {
+    await drive.write(driveFileId, serializeState({ scenarios, updatedAt: stamp }));
+    lsSet(LS.synced, String(stamp));
+    renderDriveUI();
+  } catch (e) { handleDriveError(e); }
+}
+
+function applyPull(remote) {
+  scenarios = remote.scenarios.map((s) => ({ ...Budget.createScenario(), ...s }));
+  lsSet(STORAGE_KEY, JSON.stringify(scenarios));
+  lsSet(LS.updated, String(remote.updatedAt));
+  lsSet(LS.synced, String(remote.updatedAt));
+  render();
+}
+
+async function syncWithDrive() {
+  const fresh = !driveFileId; // a file we're only just linking — forget it again if it turns out to be wrong
+  renderDriveUI("Connecting…");
+  try {
+    if (!drive.isConnected()) await drive.connect();
+    if (!driveFileId) {
+      let file = await drive.find();
+      if (!file) {
+        const create = confirm("No Hestia file found in your Google Drive yet.\n\nOK = create one from this browser's scenarios.\nCancel = pick an existing file instead.");
+        file = create ? await drive.create("") : await drive.pick();
+        if (!file) { renderDriveUI(); return; }
+      }
+      driveFileId = file.id;
+      lsSet(LS.file, file.id);
+    }
+    const remote = parseState(await drive.read(driveFileId));
+    let action = decideSync({
+      localUpdatedAt: localUpdatedAt(),
+      syncedAt: Number(lsGet(LS.synced)) || 0,
+      driveUpdatedAt: remote ? remote.updatedAt : 0,
+      driveHasData: !!remote,
+    });
+    if (action === "conflict") {
+      action = confirm("Both this browser and Google Drive have changes since the last sync.\n\nOK = keep this browser's version (overwrites Drive).\nCancel = use Drive's version (replaces what's here).") ? "push" : "pull";
+    }
+    if (action === "pull") { applyPull(remote); renderDriveUI(); }
+    else if (action === "push") await pushNow();
+    else { lsSet(LS.synced, String(localUpdatedAt())); renderDriveUI(); }
+  } catch (e) { handleDriveError(e, { forgetFile: fresh && !(e instanceof DriveAuthError) }); }
+}
+
+driveEls.btn.addEventListener("click", syncWithDrive);
+driveEls.off.addEventListener("click", () => {
+  drive.disconnect();
+  clearTimeout(pushTimer);
+  driveFileId = null;
+  lsDel(LS.file);
+  lsDel(LS.synced);
+  renderDriveUI("Disconnected (your scenarios stay in this browser and in the Drive file)");
+});
 
 function buildCard(s) {
   const card = document.createElement("section");
@@ -284,3 +389,4 @@ viewButtons.dollar.addEventListener("click", () => setView("dollar"));
 
 render();
 setView(viewMode);
+renderDriveUI();

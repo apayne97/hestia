@@ -79,3 +79,5 @@ table.tax .total td { border-top: 1px solid var(--border); font-weight: 700; pad
 }
 .lock-static { pointer-events: none; visibility: hidden; }
 .lock-static.on { visibility: visible; }
+.hidden { display: none !important; }
+.drive-status { font-size: 13px; color: var(--muted); }
