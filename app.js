@@ -109,6 +109,11 @@ function buildCard(s) {
   return card;
 }
 
+// Padlock icons (currentColor, so CSS controls the color). Locked = shackle
+// closed over the body; unlocked = shackle swung open to the side.
+const LOCK_ICON = `<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><rect x="3" y="7" width="10" height="7.5" rx="1.5" fill="currentColor"/><path d="M5 7V5a3 3 0 0 1 6 0v2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>`;
+const UNLOCK_ICON = `<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><rect x="3" y="7" width="10" height="7.5" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M5 7V5a3 3 0 0 1 5.6-1.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>`;
+
 const round = (n, places) => Number(n.toFixed(places));
 
 function setText(card, selector, text) {
@@ -140,7 +145,7 @@ function refresh(card, s) {
     const locked = !!s.locked[r.id];
     row.classList.toggle("locked", locked);
     const lockBtn = row.querySelector(".lock");
-    lockBtn.textContent = locked ? "🔒" : "🔓";
+    lockBtn.innerHTML = locked ? LOCK_ICON : UNLOCK_ICON;
     lockBtn.setAttribute("aria-pressed", String(locked));
     slider.disabled = locked;
     pctIn.readOnly = dollar || locked;

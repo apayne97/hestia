@@ -66,9 +66,10 @@ table.tax .total td { border-top: 1px solid var(--border); font-weight: 700; pad
 .seg button:first-child { border-radius: 6px 0 0 6px; }
 .seg button:last-child { border-radius: 0 6px 6px 0; border-left: 0; }
 .seg button[aria-pressed=true] { background: var(--hearth); color: #fff; border-color: var(--hearth); }
-.lock { border: 0; background: transparent; padding: 0 4px 0 0; font-size: 12px; opacity: .55; }
-.lock:hover, .cat.locked .lock { opacity: 1; background: transparent; }
-.cat.locked .cat-label { font-weight: 600; }
+.lock { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0; margin-right: 6px;
+  vertical-align: middle; border-radius: 6px; border: 1px solid transparent; background: transparent; color: var(--muted); }
+.lock:hover { background: var(--bg-hover); color: var(--text); }
+.lock[aria-pressed=true], .lock[aria-pressed=true]:hover { background: var(--hearth); border-color: var(--hearth); color: #fff; }
 .cat input[type=range]:disabled { opacity: .4; }
 @media (max-width: 480px) {
   main { padding: 12px; }
