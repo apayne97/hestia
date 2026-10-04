@@ -76,7 +76,6 @@ function buildCard(s) {
         </select>
       </label>
     </div>
-    <label class="balance"><input type="checkbox" data-field="balance"> Keep total at 100% (editing one rescales the other unlocked categories)</label>
     <div class="cats">
       <div class="cat cat-head"><span></span><span></span><span>% of pay</span><span>$ / month</span></div>
       ${Budget.CATEGORIES.map((c) => `
@@ -87,7 +86,7 @@ function buildCard(s) {
           <input type="number" min="0" step="10" data-role="amt" aria-label="${c.label} dollars per month">
         </div>`).join("")}
       <div class="cat unalloc">
-        <span class="cat-label">Unallocated</span><span></span>
+        <span class="cat-label"><span class="lock lock-static" title="Total is held at 100% while any category is locked"></span>Unallocated</span><span></span>
         <span data-role="pct"></span><span data-role="amt"></span>
       </div>
     </div>
@@ -104,7 +103,6 @@ function buildCard(s) {
   card.querySelector('[data-field="stateRate"]').value = s.stateRate;
   card.querySelector('[data-field="pretax401kPct"]').value = s.pretax401kPct;
   card.querySelector('[data-field="healthMonthly"]').value = s.healthMonthly;
-  card.querySelector('[data-field="balance"]').checked = s.balance;
   refresh(card, s);
   return card;
 }
@@ -113,6 +111,10 @@ function buildCard(s) {
 // closed over the body; unlocked = shackle swung open to the left.
 const LOCK_ICON = `<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><rect x="3" y="7" width="10" height="7.5" rx="1.5" fill="currentColor"/><path d="M5 7V5a3 3 0 0 1 6 0v2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>`;
 const UNLOCK_ICON = `<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><rect x="3" y="7" width="10" height="7.5" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M11 7V5a3 3 0 0 0-5.6-1.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>`;
+
+// While any category is locked the total is held at 100%, so Unallocated is
+// fixed at 0 too (shown with its own locked marker).
+const hasLocks = (s) => Object.values(s.locked).some(Boolean);
 
 const round = (n, places) => Number(n.toFixed(places));
 
@@ -161,6 +163,10 @@ function refresh(card, s) {
   un.querySelector('[data-role="pct"]').textContent = pctFmt.format(unPct) + "%";
   un.querySelector('[data-role="amt"]').textContent = money.format(unAmt);
   un.classList.toggle("over", a.unallocatedPct < -0.05);
+  const fixed = hasLocks(s);
+  const marker = un.querySelector(".lock-static");
+  marker.innerHTML = fixed ? LOCK_ICON : "";
+  marker.classList.toggle("on", fixed);
 
   const rent = Budget.rentRules(t.gross);
   setText(card, '[data-rent="slice"]', money.format(a.rows.find((r) => r.id === "housing").amount) + "/mo");
@@ -179,10 +185,7 @@ root.addEventListener("input", (e) => {
   if (!card) return;
   const s = find(card);
   const field = e.target.dataset.field;
-  if (field === "balance") {
-    s.balance = e.target.checked;
-    if (s.balance) s.percents = Budget.normalize(s.percents, s.locked); // snap to 100% when switching on
-  } else if (field) {
+  if (field) {
     s[field] = e.target.type === "number" ? Number(e.target.value) : e.target.value;
   } else if (e.target.dataset.role) {
     const id = e.target.closest(".cat[data-cat]").dataset.cat;
@@ -191,7 +194,7 @@ root.addEventListener("input", (e) => {
     // convert whatever unit was edited into percent of take-home
     const inDollars = e.target.dataset.role === "amt" || (e.target.dataset.role === "slider" && viewMode === "dollar");
     const pct = Math.min(100, Math.max(0, inDollars ? (net > 0 ? (v / net) * 100 : 0) : v));
-    if (s.balance) s.percents = Budget.rebalance(s.percents, id, pct, s.locked);
+    if (hasLocks(s)) s.percents = Budget.rebalance(s.percents, id, pct, s.locked);
     else s.percents[id] = pct;
   } else return;
   save();
@@ -224,6 +227,7 @@ root.addEventListener("click", (e) => {
     const s = find(card);
     const id = e.target.closest(".cat[data-cat]").dataset.cat;
     s.locked = { ...s.locked, [id]: !s.locked[id] };
+    if (hasLocks(s)) s.percents = Budget.normalize(s.percents, s.locked); // snap to 100% as soon as a lock holds the total
     save();
     refresh(card, s);
     return;

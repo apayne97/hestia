@@ -57,7 +57,6 @@ table.tax .total td { border-top: 1px solid var(--border); font-weight: 700; pad
 .footnote { margin-top: 24px; max-width: 70ch; }
 .theme-toggle { width: 34px; padding: 5px 0; }
 .inputs .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-.balance { display: flex; gap: 6px; align-items: center; font-size: 13px; color: var(--muted); margin-bottom: 8px; }
 .cat-head { font-size: 12px; color: var(--muted); }
 .cat-head span:nth-child(n+3), .cat input[type=number], .unalloc [data-role] { text-align: right; }
 .cat input[readonly] { background: transparent; border-color: transparent; color: var(--muted); pointer-events: none; }
@@ -69,7 +68,7 @@ table.tax .total td { border-top: 1px solid var(--border); font-weight: 700; pad
 .lock { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0; margin-right: 6px;
   vertical-align: middle; border-radius: 6px; border: 1px solid transparent; background: transparent; color: var(--muted); }
 .lock:hover { background: var(--bg-hover); color: var(--text); }
-.lock[aria-pressed=true], .lock[aria-pressed=true]:hover { background: var(--hearth); border-color: var(--hearth); color: #fff; }
+.lock[aria-pressed=true], .lock[aria-pressed=true]:hover, .lock-static.on { background: var(--hearth); border-color: var(--hearth); color: #fff; }
 .cat input[type=range]:disabled { opacity: .4; }
 @media (max-width: 480px) {
   main { padding: 12px; }
@@ -78,3 +77,5 @@ table.tax .total td { border-top: 1px solid var(--border); font-weight: 700; pad
   .card { padding: 12px; }
   .cat { grid-template-columns: 1fr 60px 56px 72px; gap: 6px; }
 }
+.lock-static { pointer-events: none; visibility: hidden; }
+.lock-static.on { visibility: visible; }

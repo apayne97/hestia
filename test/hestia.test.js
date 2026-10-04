@@ -141,3 +141,9 @@ test("normalize with locks keeps locked values and scales the rest", () => {
   near(p.savings + p.dining, 70);
   near(p.savings, p.dining);
 });
+
+test("normalize with every category locked returns them unchanged (no NaN)", () => {
+  const all = Object.fromEntries(Budget.CATEGORIES.map((c) => [c.id, true]));
+  const p = Budget.normalize(Budget.PRESETS["50/30/20"], all);
+  assert.deepEqual(p, Budget.PRESETS["50/30/20"]);
+});

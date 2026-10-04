@@ -32,8 +32,7 @@ function createScenario(overrides = {}) {
     stateRate: 0,
     pretax401kPct: 0,
     healthMonthly: 0,
-    locked: {}, // category ids that auto-balance must not touch
-    balance: false, // "Keep total at 100%": editing one category rescales the rest
+    locked: {}, // category ids that auto-balance must not touch. While any category is locked, the total is held at 100%.
     percents: { ...PRESETS[DEFAULT_PRESET] },
     ...overrides,
   };
@@ -89,6 +88,7 @@ function normalize(percents, locked = {}) {
   const freeSum = free.reduce((sum, id) => sum + pct(id), 0);
   const out = {};
   for (const id of lockedIds) out[id] = pct(id);
+  if (!free.length) return out; // everything locked: nothing to scale
   for (const id of free) out[id] = freeSum > 0 ? (pct(id) / freeSum) * available : available / free.length;
   return out;
 }
