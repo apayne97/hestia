@@ -8,6 +8,8 @@
 //     clientId, apiKey, appId,      // from Google Cloud Console (public by design;
 //                                   // restrict the API key to your domains)
 //     fileName: "my-data.json",     // default file this app looks for / creates
+//     folderName: "My App",         // optional: folder the file lives in, so it
+//                                   // doesn't clutter the top level of Drive
 //     mimeType: "application/json", // optional
 //   });
 //   await drive.connect();          // sign-in popup — call from a click
@@ -20,7 +22,7 @@
 // DriveAuthError so the UI can ask the user to reconnect.
 class DriveAuthError extends Error {}
 
-function createDrive({ clientId, apiKey, appId, fileName, mimeType = "application/json", scope = "https://www.googleapis.com/auth/drive.file" }) {
+function createDrive({ clientId, apiKey, appId, fileName, folderName, mimeType = "application/json", scope = "https://www.googleapis.com/auth/drive.file" }) {
   let token = null;
 
   function loadScriptOnce(src) {
@@ -82,25 +84,65 @@ function createDrive({ clientId, apiKey, appId, fileName, mimeType = "applicatio
       token = null;
       throw new DriveAuthError("Your Google sign-in expired.");
     }
-    if (!res.ok) throw new Error(`Google Drive request failed (${res.status}).`);
+    if (!res.ok) throw Object.assign(new Error(`Google Drive request failed (${res.status}).`), { status: res.status });
     return res;
   }
 
-  // Most recently modified non-trashed file with this name among files the app
-  // can see (created by it, or picked earlier) → {id, name} or null.
-  async function find(name = fileName) {
-    const q = `name='${name.replace(/'/g, "\\'")}' and trashed=false`;
+  const FOLDER_MIME = "application/vnd.google-apps.folder";
+  const quote = (s) => s.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+
+  async function firstMatch(q) {
     const url = "https://www.googleapis.com/drive/v3/files?" +
       new URLSearchParams({ q, orderBy: "modifiedTime desc", pageSize: "1", fields: "files(id,name)" });
     const { files } = await (await api(url)).json();
     return files && files.length ? files[0] : null;
   }
 
+  // Most recently modified non-trashed file with this name among files the app
+  // can see (created by it, or picked earlier) → {id, name} or null. With
+  // parentId, only looks inside that folder.
+  async function find(name = fileName, parentId) {
+    let q = `name='${quote(name)}' and trashed=false`;
+    if (parentId) q += ` and '${quote(parentId)}' in parents`;
+    return firstMatch(q);
+  }
+
+  // Same, for a folder → {id, name} or null.
+  async function findFolder(name = folderName) {
+    return firstMatch(`name='${quote(name)}' and mimeType='${FOLDER_MIME}' and trashed=false`);
+  }
+
+  async function createFolder(name = folderName, parentId) {
+    const metadata = { name, mimeType: FOLDER_MIME };
+    if (parentId) metadata.parents = [parentId];
+    const res = await api("https://www.googleapis.com/drive/v3/files?fields=id,name", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(metadata),
+    });
+    return res.json();
+  }
+
+  // Move a file into a folder (out of whatever folder(s) it's in now).
+  async function move(fileId, folderId) {
+    const { parents = [] } = await (await api(`https://www.googleapis.com/drive/v3/files/${fileId}?fields=parents`)).json();
+    if (parents.length === 1 && parents[0] === folderId) return;
+    const params = new URLSearchParams({ addParents: folderId, fields: "id" });
+    if (parents.length) params.set("removeParents", parents.join(","));
+    await api(`https://www.googleapis.com/drive/v3/files/${fileId}?${params}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    });
+  }
+
   // Files the app creates itself need no Picker grant under drive.file.
-  async function create(content, name = fileName) {
+  async function create(content, name = fileName, parentId) {
     const boundary = "gdrive-boundary-" + Math.random().toString(36).slice(2);
+    const metadata = { name, mimeType };
+    if (parentId) metadata.parents = [parentId];
     const body =
-      `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify({ name, mimeType })}\r\n` +
+      `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n` +
       `--${boundary}\r\nContent-Type: ${mimeType}\r\n\r\n${content}\r\n` +
       `--${boundary}--`;
     const res = await api("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name", {
@@ -123,14 +165,9 @@ function createDrive({ clientId, apiKey, appId, fileName, mimeType = "applicatio
     });
   }
 
-  // Fallback for when find() comes up empty on a new device: let the user pick
-  // the file (picking is what grants the app access under drive.file).
-  // → {id, name}, or null if cancelled.
-  async function pick() {
-    await ensurePickerLoaded();
+  function runPicker(view) {
     return new Promise((resolve, reject) => {
       if (!token) { reject(new DriveAuthError("Not connected to Google Drive.")); return; }
-      const view = new google.picker.DocsView(google.picker.ViewId.DOCS).setIncludeFolders(false).setSelectFolderEnabled(false);
       new google.picker.PickerBuilder()
         .addView(view)
         .setOAuthToken(token)
@@ -145,8 +182,25 @@ function createDrive({ clientId, apiKey, appId, fileName, mimeType = "applicatio
     });
   }
 
+  // Fallback for when find() comes up empty on a new device: let the user pick
+  // the file (picking is what grants the app access under drive.file).
+  // parentId, if given, scopes the picker to that folder.
+  // → {id, name}, or null if cancelled.
+  async function pick(parentId) {
+    await ensurePickerLoaded();
+    const view = new google.picker.DocsView(google.picker.ViewId.DOCS).setIncludeFolders(false).setSelectFolderEnabled(false);
+    if (parentId) view.setParent(parentId);
+    return runPicker(view);
+  }
+
+  // Same, for choosing a folder.
+  async function pickFolder() {
+    await ensurePickerLoaded();
+    return runPicker(new google.picker.DocsView(google.picker.ViewId.FOLDERS).setSelectFolderEnabled(true));
+  }
+
   return {
-    connect, disconnect, find, create, read, write, pick,
+    connect, disconnect, find, findFolder, createFolder, move, create, read, write, pick, pickFolder,
     isConnected: () => !!token,
     _setToken: (t) => { token = t; }, // test hook
   };

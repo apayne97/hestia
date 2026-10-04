@@ -3,7 +3,7 @@ const assert = require("node:assert/strict");
 const { createDrive, DriveAuthError } = require("../gdrive.js");
 const { decideSync, serializeState, parseState } = require("../sync.js");
 
-const drive = createDrive({ clientId: "cid", apiKey: "key", appId: "123", fileName: "hestia-scenarios.json" });
+const drive = createDrive({ clientId: "cid", apiKey: "key", appId: "123", fileName: "hestia-scenarios.json", folderName: "Hestia" });
 
 test("decideSync: empty Drive file gets the local data", () => {
   assert.equal(decideSync({ localUpdatedAt: 0, syncedAt: 0, driveUpdatedAt: 0, driveHasData: false }), "push");
@@ -92,4 +92,61 @@ test("createDriveFile uploads multipart JSON with the file name", async () => {
   assert.match(calls[0].options.headers["Content-Type"], /^multipart\/related; boundary=/);
   assert.match(calls[0].options.body, /"name":"hestia-scenarios\.json"/);
   assert.match(calls[0].options.body, /\{"app":"hestia"\}/);
+});
+
+test("find with a parent folder restricts the search to that folder", async () => {
+  drive._setToken("tok");
+  const calls = stubFetch(() => jsonRes({ files: [] }));
+  await drive.find(undefined, "folder1");
+  assert.equal(new URL(calls[0].url).searchParams.get("q"),
+    "name='hestia-scenarios.json' and trashed=false and 'folder1' in parents");
+});
+
+test("findFolder searches by folder name and folder mime type", async () => {
+  drive._setToken("tok");
+  const calls = stubFetch(() => jsonRes({ files: [{ id: "d1", name: "Hestia" }] }));
+  assert.deepEqual(await drive.findFolder(), { id: "d1", name: "Hestia" });
+  assert.equal(new URL(calls[0].url).searchParams.get("q"),
+    "name='Hestia' and mimeType='application/vnd.google-apps.folder' and trashed=false");
+});
+
+test("names with quotes are escaped in the Drive query", async () => {
+  drive._setToken("tok");
+  const calls = stubFetch(() => jsonRes({ files: [] }));
+  await drive.findFolder("Alex's budget");
+  assert.match(new URL(calls[0].url).searchParams.get("q"), /name='Alex\\'s budget'/);
+});
+
+test("createFolder posts a folder-typed file", async () => {
+  drive._setToken("tok");
+  const calls = stubFetch(() => jsonRes({ id: "d2", name: "Hestia" }));
+  assert.deepEqual(await drive.createFolder(), { id: "d2", name: "Hestia" });
+  assert.deepEqual(JSON.parse(calls[0].options.body), { name: "Hestia", mimeType: "application/vnd.google-apps.folder" });
+});
+
+test("create puts the file in the given folder", async () => {
+  drive._setToken("tok");
+  const calls = stubFetch(() => jsonRes({ id: "n1", name: "hestia-scenarios.json" }));
+  await drive.create("{}", undefined, "d2");
+  assert.match(calls[0].options.body, /"parents":\["d2"\]/);
+});
+
+test("move swaps the file's parents for the new folder, and does nothing if it's already there", async () => {
+  drive._setToken("tok");
+  let calls = stubFetch((url, o) => o.method === "PATCH" ? jsonRes({ id: "f1" }) : jsonRes({ parents: ["rootId"] }));
+  await drive.move("f1", "d2");
+  assert.equal(calls.length, 2);
+  const patch = new URL(calls[1].url);
+  assert.equal(calls[1].options.method, "PATCH");
+  assert.equal(patch.searchParams.get("addParents"), "d2");
+  assert.equal(patch.searchParams.get("removeParents"), "rootId");
+  calls = stubFetch(() => jsonRes({ parents: ["d2"] }));
+  await drive.move("f1", "d2");
+  assert.equal(calls.length, 1); // only the parents lookup
+});
+
+test("non-401 failures carry the HTTP status so callers can react to a 404", async () => {
+  drive._setToken("tok");
+  stubFetch(() => jsonRes({}, 404));
+  await assert.rejects(() => drive.read("gone"), (e) => e.status === 404 && /404/.test(e.message));
 });

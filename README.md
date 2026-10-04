@@ -17,8 +17,8 @@ Tests: `npm test` (Node's built-in runner, no install needed).
 
 ## Google Drive sync (optional)
 
-"Connect Google Drive" keeps all scenarios in one `hestia-scenarios.json` in
-your own Drive, so they follow you between devices. It uses the narrow
+"Connect Google Drive" keeps all scenarios in one `hestia-scenarios.json`
+inside a `Hestia` folder in your own Drive ("Change folder" moves it), so they follow you between devices. It uses the narrow
 `drive.file` scope (the app can only see files it created or you picked) and
 runs entirely in the browser. Edits auto-save ~1s after you stop typing; if
 both this browser and Drive changed since the last sync you're asked which
