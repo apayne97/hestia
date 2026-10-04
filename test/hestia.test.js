@@ -154,3 +154,19 @@ test("paychecks: 26 a year, so a paycheck is smaller than a month's pay", () => 
   near(78000 / Budget.PAY_PERIODS_PER_YEAR, 3000);
   assert.ok(t.net / Budget.PAY_PERIODS_PER_YEAR < t.netMonthly);
 });
+
+test("rebalance: editing a locked category directly is allowed; unlocked ones absorb the change, other locked ones stay", () => {
+  const start = Budget.PRESETS["50/30/20"]; // housing 25, savings 20, ...
+  const locked = { housing: true, savings: true };
+  const p = Budget.rebalance(start, "housing", 35, locked);
+  near(p.housing, 35);          // the pinned category took the user's value
+  near(p.savings, 20);          // the other pinned one didn't move
+  near(Object.values(p).reduce((a, b) => a + b, 0), 100, 1e-9);
+  assert.ok(p.dining < start.dining && p.groceries < start.groceries); // unlocked ones gave up the difference
+});
+
+test("rebalance: a locked category's edit is still capped by the other locked ones", () => {
+  const p = Budget.rebalance(Budget.PRESETS["50/30/20"], "housing", 95, { housing: true, savings: true });
+  near(p.housing, 80); // 100 - savings (20)
+  near(p.savings, 20);
+});

@@ -263,13 +263,13 @@ function buildCard(s) {
         </span></div>
       ${Budget.CATEGORIES.map((c) => `
         <div class="cat" data-cat="${c.id}">
-          <span class="cat-label"><button type="button" class="lock" data-action="lock" aria-label="Lock ${c.label}"></button>${c.label}</span>
+          <span class="cat-label"><button type="button" class="lock" data-action="lock" aria-label="Pin ${c.label}" title="Pin: auto-balancing won't change this category (you can still edit it yourself)"></button>${c.label}</span>
           <input type="range" min="0" max="60" step="1" data-role="slider" aria-label="${c.label} slider">
           <input type="number" min="0" max="100" step="0.5" data-role="pct" aria-label="${c.label} percent">
           <input type="number" min="0" step="10" data-role="amt" aria-label="${c.label} dollars per month">
         </div>`).join("")}
       <div class="cat unalloc">
-        <span class="cat-label"><span class="lock lock-static" title="Total is held at 100% while any category is locked"></span>Unallocated</span><span></span>
+        <span class="cat-label"><span class="lock lock-static" title="Total is held at 100% while any category is pinned"></span>Unallocated</span><span></span>
         <span data-role="pct"></span><span data-role="amt"></span>
       </div>
     </div>
@@ -337,9 +337,9 @@ function refresh(card, s) {
       lockBtn.dataset.state = String(locked);
     }
     lockBtn.setAttribute("aria-pressed", String(locked));
-    slider.disabled = locked;
-    pctIn.readOnly = dollar || locked;
-    amtIn.readOnly = !dollar || locked;
+    // a locked ("pinned") category is only protected from auto-balancing; you can still edit it
+    pctIn.readOnly = dollar;
+    amtIn.readOnly = !dollar;
     // never rewrite the field the user is typing in; update everything else
     if (document.activeElement !== slider) slider.value = dollar ? round(r.amount, 0) : round(r.pct, 1);
     if (document.activeElement !== pctIn) pctIn.value = round(r.pct, 1);

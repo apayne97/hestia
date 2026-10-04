@@ -71,7 +71,6 @@ table.tax .total td { border-top: 1px solid var(--border); font-weight: 700; pad
 .lock svg { width: 16px; height: 16px; pointer-events: none; } /* clicks always land on the button, not the drawing */
 .lock:hover { background: var(--bg-hover); color: var(--text); }
 .lock[aria-pressed=true], .lock[aria-pressed=true]:hover, .lock-static.on { background: var(--hearth); border-color: var(--hearth); color: var(--on-hearth); }
-.cat input[type=range]:disabled { opacity: .4; }
 @media (max-width: 480px) {
   main { padding: 12px; }
   .top { padding: 10px 12px; gap: 8px; }

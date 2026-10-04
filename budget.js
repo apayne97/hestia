@@ -35,7 +35,7 @@ function createScenario(overrides = {}) {
     stateRate: 0,
     pretax401kPct: 0,
     healthMonthly: 0,
-    locked: {}, // category ids that auto-balance must not touch. While any category is locked, the total is held at 100%.
+    locked: {}, // "pinned" category ids: auto-balancing never moves them (you can still edit them yourself). While any category is pinned, the total is held at 100%.
     percents: { ...PRESETS[DEFAULT_PRESET] },
     ...overrides,
   };
@@ -59,10 +59,12 @@ function allocate(netMonthly, percents) {
 }
 
 // Set one category to `value`% and rescale every OTHER unlocked category
-// proportionally so the total stays 100. Locked categories never move (and
-// can't be the one being changed); if you ask for more than is left after
-// the locked ones, the value is capped. If the other unlocked categories are
-// all zero they split the remainder equally; if there are none, the changed
+// proportionally so the total stays 100. Locked ("pinned") categories are
+// never moved by auto-balancing — but the category being changed may itself
+// be locked: pinning only protects a value from other edits, not from the
+// user typing in it. If you ask for more than is left after the OTHER locked
+// categories, the value is capped. If the other unlocked categories are all
+// zero they split the remainder equally; if there are none, the changed
 // category simply takes everything that's left. Returns a new percents object.
 function rebalance(percents, changedId, value, locked = {}) {
   const ids = CATEGORIES.map((c) => c.id);
