@@ -6,13 +6,18 @@ const STORAGE_KEY = "hestia-scenarios-v1";
 const money = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 const pctFmt = new Intl.NumberFormat("en-US", { maximumFractionDigits: 1 });
 
+const VIEW_KEY = "hestia-view";
+let viewMode = "percent"; // "percent" | "dollar": which column of each category row is editable
+try { if (localStorage.getItem(VIEW_KEY) === "dollar") viewMode = "dollar"; } catch (e) { /* ignore */ }
+
 let scenarios = loadScenarios();
 const root = document.getElementById("scenarios");
 
 function loadScenarios() {
   try {
     const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY));
-    if (Array.isArray(parsed) && parsed.length) return parsed;
+    // spread over fresh defaults so scenarios saved before a field existed still load
+    if (Array.isArray(parsed) && parsed.length) return parsed.map((s) => ({ ...Budget.createScenario(), ...s }));
   } catch (e) { /* no storage, or corrupt — fall through to a fresh scenario */ }
   return [Budget.createScenario({ name: "Scenario 1" })];
 }
@@ -43,12 +48,21 @@ function buildCard(s) {
       <label>State income tax (effective %)
         <input type="number" min="0" max="20" step="0.1" data-field="stateRate">
       </label>
+      <div class="pair">
+        <label>401(k) (% of gross, pre-tax)
+          <input type="number" min="0" max="100" step="0.5" data-field="pretax401kPct">
+        </label>
+        <label>Health premiums ($/mo, pre-tax)
+          <input type="number" min="0" step="10" data-field="healthMonthly">
+        </label>
+      </div>
     </div>
     <table class="tax">
       <thead><tr><th></th><th>Year</th><th>Month</th></tr></thead>
       <tbody>
         ${[["gross", "Gross pay"], ["federal", "Federal income tax"], ["socialSecurity", "Social Security"],
-           ["medicare", "Medicare"], ["state", "State tax"]]
+           ["medicare", "Medicare"], ["state", "State tax"],
+           ["k401", "401(k) contribution"], ["health", "Health premiums"]]
           .map(([k, label]) => `<tr><td>${label}</td><td data-tax="${k}"></td><td data-tax-mo="${k}"></td></tr>`).join("")}
         <tr class="total"><td>Take-home</td><td data-tax="net"></td><td data-tax-mo="net"></td></tr>
       </tbody>
@@ -62,17 +76,19 @@ function buildCard(s) {
         </select>
       </label>
     </div>
+    <label class="balance"><input type="checkbox" data-field="balance"> Keep total at 100% (editing one rescales the other unlocked categories)</label>
     <div class="cats">
+      <div class="cat cat-head"><span></span><span></span><span>% of pay</span><span>$ / month</span></div>
       ${Budget.CATEGORIES.map((c) => `
         <div class="cat" data-cat="${c.id}">
-          <span class="cat-label">${c.label}</span>
-          <input type="range" min="0" max="60" step="1" data-role="slider" aria-label="${c.label} percent">
+          <span class="cat-label"><button type="button" class="lock" data-action="lock" aria-label="Lock ${c.label}"></button>${c.label}</span>
+          <input type="range" min="0" max="60" step="1" data-role="slider" aria-label="${c.label} slider">
           <input type="number" min="0" max="100" step="0.5" data-role="pct" aria-label="${c.label} percent">
-          <span class="cat-amt" data-role="amt"></span>
+          <input type="number" min="0" step="10" data-role="amt" aria-label="${c.label} dollars per month">
         </div>`).join("")}
-      <div class="cat unalloc" data-out="unalloc">
+      <div class="cat unalloc">
         <span class="cat-label">Unallocated</span><span></span>
-        <span data-role="pct"></span><span class="cat-amt" data-role="amt"></span>
+        <span data-role="pct"></span><span data-role="amt"></span>
       </div>
     </div>
     <div class="rent">
@@ -86,14 +102,14 @@ function buildCard(s) {
   card.querySelector('[data-field="salary"]').value = s.salary;
   card.querySelector('[data-field="filing"]').value = s.filing;
   card.querySelector('[data-field="stateRate"]').value = s.stateRate;
-  for (const row of card.querySelectorAll(".cat[data-cat]")) {
-    const v = s.percents[row.dataset.cat] ?? 0;
-    row.querySelector('[data-role="slider"]').value = v;
-    row.querySelector('[data-role="pct"]').value = v;
-  }
+  card.querySelector('[data-field="pretax401kPct"]').value = s.pretax401kPct;
+  card.querySelector('[data-field="healthMonthly"]').value = s.healthMonthly;
+  card.querySelector('[data-field="balance"]').checked = s.balance;
   refresh(card, s);
   return card;
 }
+
+const round = (n, places) => Number(n.toFixed(places));
 
 function setText(card, selector, text) {
   const el = card.querySelector(selector);
@@ -102,7 +118,7 @@ function setText(card, selector, text) {
 
 function refresh(card, s) {
   const t = Tax.estimateTax(s);
-  for (const k of ["gross", "federal", "socialSecurity", "medicare", "state", "net"]) {
+  for (const k of ["gross", "federal", "socialSecurity", "medicare", "state", "k401", "health", "net"]) {
     const sign = k === "gross" || k === "net" ? "" : "−";
     setText(card, `[data-tax="${k}"]`, sign + money.format(t[k]));
     setText(card, `[data-tax-mo="${k}"]`, sign + money.format(t[k] / 12));
@@ -111,13 +127,35 @@ function refresh(card, s) {
     `Effective tax rate ${pctFmt.format(t.effectiveRate * 100)}% · top federal bracket ${pctFmt.format(t.marginalFederal * 100)}% (${Tax.TAX_YEAR} rates, estimate only)`);
 
   const a = Budget.allocate(t.netMonthly, s.percents);
+  const dollar = viewMode === "dollar";
+  // slider tracks whichever unit is being edited; dollar range scales with take-home
+  const dollarMax = Math.max(50, Math.ceil((t.netMonthly * 0.6) / 50) * 50);
   for (const r of a.rows) {
-    setText(card, `.cat[data-cat="${r.id}"] [data-role="amt"]`, money.format(r.amount) + "/mo");
+    const row = card.querySelector(`.cat[data-cat="${r.id}"]`);
+    const slider = row.querySelector('[data-role="slider"]');
+    slider.max = dollar ? dollarMax : 60;
+    slider.step = dollar ? 5 : 1;
+    const pctIn = row.querySelector('[data-role="pct"]');
+    const amtIn = row.querySelector('[data-role="amt"]');
+    const locked = !!s.locked[r.id];
+    row.classList.toggle("locked", locked);
+    const lockBtn = row.querySelector(".lock");
+    lockBtn.textContent = locked ? "🔒" : "🔓";
+    lockBtn.setAttribute("aria-pressed", String(locked));
+    slider.disabled = locked;
+    pctIn.readOnly = dollar || locked;
+    amtIn.readOnly = !dollar || locked;
+    // never rewrite the field the user is typing in; update everything else
+    if (document.activeElement !== slider) slider.value = dollar ? round(r.amount, 0) : round(r.pct, 1);
+    if (document.activeElement !== pctIn) pctIn.value = round(r.pct, 1);
+    if (document.activeElement !== amtIn) amtIn.value = round(r.amount, 0);
   }
   const un = card.querySelector(".unalloc");
-  un.querySelector('[data-role="pct"]').textContent = pctFmt.format(a.unallocatedPct) + "%";
-  un.querySelector('[data-role="amt"]').textContent = money.format(a.unallocatedAmount) + "/mo";
-  un.classList.toggle("over", a.unallocatedPct < -0.001);
+  const unPct = Math.abs(a.unallocatedPct) < 0.05 ? 0 : a.unallocatedPct;
+  const unAmt = Math.abs(a.unallocatedAmount) < 0.5 ? 0 : a.unallocatedAmount;
+  un.querySelector('[data-role="pct"]').textContent = pctFmt.format(unPct) + "%";
+  un.querySelector('[data-role="amt"]').textContent = money.format(unAmt);
+  un.classList.toggle("over", a.unallocatedPct < -0.05);
 
   const rent = Budget.rentRules(t.gross);
   setText(card, '[data-rent="slice"]', money.format(a.rows.find((r) => r.id === "housing").amount) + "/mo");
@@ -136,15 +174,20 @@ root.addEventListener("input", (e) => {
   if (!card) return;
   const s = find(card);
   const field = e.target.dataset.field;
-  if (field) {
+  if (field === "balance") {
+    s.balance = e.target.checked;
+    if (s.balance) s.percents = Budget.normalize(s.percents, s.locked); // snap to 100% when switching on
+  } else if (field) {
     s[field] = e.target.type === "number" ? Number(e.target.value) : e.target.value;
   } else if (e.target.dataset.role) {
-    const row = e.target.closest(".cat[data-cat]");
+    const id = e.target.closest(".cat[data-cat]").dataset.cat;
     const v = Number(e.target.value) || 0;
-    s.percents[row.dataset.cat] = v;
-    // keep the slider and the number box in sync with each other
-    row.querySelector('[data-role="slider"]').value = v;
-    if (e.target.dataset.role === "slider") row.querySelector('[data-role="pct"]').value = v;
+    const net = Tax.estimateTax(s).netMonthly;
+    // convert whatever unit was edited into percent of take-home
+    const inDollars = e.target.dataset.role === "amt" || (e.target.dataset.role === "slider" && viewMode === "dollar");
+    const pct = Math.min(100, Math.max(0, inDollars ? (net > 0 ? (v / net) * 100 : 0) : v));
+    if (s.balance) s.percents = Budget.rebalance(s.percents, id, pct, s.locked);
+    else s.percents[id] = pct;
   } else return;
   save();
   refresh(card, s);
@@ -155,28 +198,80 @@ root.addEventListener("change", (e) => {
   const s = find(e.target.closest(".card"));
   s.percents = { ...Budget.PRESETS[e.target.value] };
   save();
-  render();
+  const viewButtons = { percent: document.getElementById("viewPercent"), dollar: document.getElementById("viewDollar") };
+function setView(mode) {
+  viewMode = mode;
+  try { localStorage.setItem(VIEW_KEY, mode); } catch (e) { /* ignore */ }
+  for (const [m, btn] of Object.entries(viewButtons)) btn.setAttribute("aria-pressed", String(m === mode));
+  for (const card of root.children) refresh(card, find(card));
+}
+viewButtons.percent.addEventListener("click", () => setView("percent"));
+viewButtons.dollar.addEventListener("click", () => setView("dollar"));
+
+render();
+setView(viewMode);
 });
 
 root.addEventListener("click", (e) => {
   const action = e.target.dataset.action;
   const card = e.target.closest(".card");
+  if (action === "lock" && card) {
+    const s = find(card);
+    const id = e.target.closest(".cat[data-cat]").dataset.cat;
+    s.locked = { ...s.locked, [id]: !s.locked[id] };
+    save();
+    refresh(card, s);
+    return;
+  }
   if (!card || (action !== "delete" && action !== "duplicate")) return;
   const i = scenarios.findIndex((s) => s.id === card.dataset.id);
   if (action === "duplicate") {
     const src = scenarios[i];
-    scenarios.splice(i + 1, 0, Budget.createScenario({ ...src, name: src.name + " copy", percents: { ...src.percents } }));
+    scenarios.splice(i + 1, 0, Budget.createScenario({ ...src, name: src.name + " copy", percents: { ...src.percents }, locked: { ...src.locked } }));
   } else if (scenarios.length > 1) {
     scenarios.splice(i, 1);
   }
   save();
-  render();
+  const viewButtons = { percent: document.getElementById("viewPercent"), dollar: document.getElementById("viewDollar") };
+function setView(mode) {
+  viewMode = mode;
+  try { localStorage.setItem(VIEW_KEY, mode); } catch (e) { /* ignore */ }
+  for (const [m, btn] of Object.entries(viewButtons)) btn.setAttribute("aria-pressed", String(m === mode));
+  for (const card of root.children) refresh(card, find(card));
+}
+viewButtons.percent.addEventListener("click", () => setView("percent"));
+viewButtons.dollar.addEventListener("click", () => setView("dollar"));
+
+render();
+setView(viewMode);
 });
 
 document.getElementById("addScenario").addEventListener("click", () => {
   scenarios.push(Budget.createScenario({ name: `Scenario ${scenarios.length + 1}` }));
   save();
-  render();
-});
+  const viewButtons = { percent: document.getElementById("viewPercent"), dollar: document.getElementById("viewDollar") };
+function setView(mode) {
+  viewMode = mode;
+  try { localStorage.setItem(VIEW_KEY, mode); } catch (e) { /* ignore */ }
+  for (const [m, btn] of Object.entries(viewButtons)) btn.setAttribute("aria-pressed", String(m === mode));
+  for (const card of root.children) refresh(card, find(card));
+}
+viewButtons.percent.addEventListener("click", () => setView("percent"));
+viewButtons.dollar.addEventListener("click", () => setView("dollar"));
 
 render();
+setView(viewMode);
+});
+
+const viewButtons = { percent: document.getElementById("viewPercent"), dollar: document.getElementById("viewDollar") };
+function setView(mode) {
+  viewMode = mode;
+  try { localStorage.setItem(VIEW_KEY, mode); } catch (e) { /* ignore */ }
+  for (const [m, btn] of Object.entries(viewButtons)) btn.setAttribute("aria-pressed", String(m === mode));
+  for (const card of root.children) refresh(card, find(card));
+}
+viewButtons.percent.addEventListener("click", () => setView("percent"));
+viewButtons.dollar.addEventListener("click", () => setView("dollar"));
+
+render();
+setView(viewMode);

@@ -51,23 +51,33 @@ function marginalRate(taxableIncome, filing) {
   return brackets[brackets.length - 1][1];
 }
 
-// stateRate is a percentage (e.g. 5 for 5%), applied flat to gross.
-function estimateTax({ salary, filing = "single", stateRate = 0 }) {
+// stateRate and pretax401kPct are percentages (5 means 5%); healthMonthly is
+// dollars/month of pre-tax health premiums.
+//   401(k): reduces income-tax wages (federal + state) but NOT FICA wages.
+//   Health premiums (cafeteria plan): reduce income-tax AND FICA wages.
+// Take-home is gross minus taxes minus both contributions, so the budget
+// percentages apply to what actually lands in the paycheck.
+function estimateTax({ salary, filing = "single", stateRate = 0, pretax401kPct = 0, healthMonthly = 0 }) {
   const gross = Math.max(0, Number(salary) || 0);
   const f = FEDERAL[filing] || FEDERAL.single;
-  const taxable = Math.max(0, gross - f.standardDeduction);
-  const federal = federalIncomeTax(taxable, filing in FEDERAL ? filing : "single");
-  const socialSecurity = Math.min(gross, SOCIAL_SECURITY_WAGE_BASE) * SOCIAL_SECURITY_RATE;
-  const medicare = gross * MEDICARE_RATE + Math.max(0, gross - f.addlMedicareThreshold) * ADDL_MEDICARE_RATE;
-  const state = gross * ((Number(stateRate) || 0) / 100);
+  const bracketKey = filing in FEDERAL ? filing : "single";
+  const k401 = Math.min(gross, gross * Math.max(0, Number(pretax401kPct) || 0) / 100);
+  const health = Math.min(gross - k401, Math.max(0, (Number(healthMonthly) || 0) * 12));
+  const incomeTaxWages = gross - k401 - health;
+  const ficaWages = gross - health;
+  const taxable = Math.max(0, incomeTaxWages - f.standardDeduction);
+  const federal = federalIncomeTax(taxable, bracketKey);
+  const socialSecurity = Math.min(ficaWages, SOCIAL_SECURITY_WAGE_BASE) * SOCIAL_SECURITY_RATE;
+  const medicare = ficaWages * MEDICARE_RATE + Math.max(0, ficaWages - f.addlMedicareThreshold) * ADDL_MEDICARE_RATE;
+  const state = incomeTaxWages * ((Number(stateRate) || 0) / 100);
   const totalTax = federal + socialSecurity + medicare + state;
-  const net = gross - totalTax;
+  const net = gross - totalTax - k401 - health;
   return {
-    gross, federal, socialSecurity, medicare, state, totalTax, net,
+    gross, k401, health, federal, socialSecurity, medicare, state, totalTax, net,
     grossMonthly: gross / 12,
     netMonthly: net / 12,
     effectiveRate: gross > 0 ? totalTax / gross : 0,
-    marginalFederal: marginalRate(taxable, filing in FEDERAL ? filing : "single"),
+    marginalFederal: marginalRate(taxable, bracketKey),
   };
 }
 
