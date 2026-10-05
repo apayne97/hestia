@@ -10,17 +10,20 @@ const CATEGORIES = [
   { id: "health", label: "Health & insurance" },
   { id: "dining", label: "Dining out & fun" },
   { id: "shopping", label: "Shopping & misc" },
+  { id: "donations", label: "Donations" },
   { id: "savings", label: "Savings & investing" },
 ];
 
-// Percent of TAKE-HOME pay. 50/30/20 puts 50% on needs (housing, utilities,
-// groceries, transport, health), 30% on wants, 20% on savings.
+// Percent of TAKE-HOME pay. The "50/20/20 + 10 giving" preset is 50% needs
+// (housing, utilities, groceries, transport, health), 20% wants, 20% savings
+// and 10% donations — the classic 50/30/20 with the donations coming out of
+// the wants. Every preset must total exactly 100 (a test checks).
 const PRESETS = {
-  "50/30/20": { housing: 25, utilities: 5, groceries: 10, transport: 5, health: 5, dining: 15, shopping: 15, savings: 20 },
-  "60/20/20": { housing: 30, utilities: 5, groceries: 10, transport: 8, health: 7, dining: 10, shopping: 10, savings: 20 },
-  "Frugal (40% saved)": { housing: 22, utilities: 4, groceries: 10, transport: 5, health: 4, dining: 8, shopping: 7, savings: 40 },
+  "50/20/20 + 10 giving": { housing: 25, utilities: 5, groceries: 10, transport: 5, health: 5, dining: 10, shopping: 10, donations: 10, savings: 20 },
+  "60/10/20 + 10 giving": { housing: 30, utilities: 5, groceries: 10, transport: 8, health: 7, dining: 5, shopping: 5, donations: 10, savings: 20 },
+  "Frugal (30% saved)": { housing: 22, utilities: 4, groceries: 10, transport: 5, health: 4, dining: 8, shopping: 7, donations: 10, savings: 30 },
 };
-const DEFAULT_PRESET = "50/30/20";
+const DEFAULT_PRESET = "50/20/20 + 10 giving";
 
 // Biweekly pay: 26 paychecks a year (not 24, and not 12 x 2).
 const PAY_PERIODS_PER_YEAR = 26;

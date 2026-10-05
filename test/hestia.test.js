@@ -87,7 +87,7 @@ test("pre-tax contributions can't exceed gross pay", () => {
 });
 
 test("rebalance: changed category is set and the rest rescale to total 100", () => {
-  const p = Budget.rebalance(Budget.PRESETS["50/30/20"], "housing", 40);
+  const p = Budget.rebalance(Budget.PRESETS[Budget.DEFAULT_PRESET], "housing", 40);
   near(p.housing, 40);
   near(Object.values(p).reduce((a, b) => a + b, 0), 100, 1e-9);
   // others keep their relative proportions: groceries was 2x transport
@@ -97,7 +97,7 @@ test("rebalance: changed category is set and the rest rescale to total 100", () 
 test("rebalance: clamps to 0-100 and splits evenly when the others are all zero", () => {
   const zeros = Object.fromEntries(Budget.CATEGORIES.map((c) => [c.id, 0]));
   const p = Budget.rebalance(zeros, "housing", 30);
-  near(p.groceries, 10); // 70 / 7 others
+  near(p.groceries, 70 / (Budget.CATEGORIES.length - 1)); // the remainder split evenly among the others
   near(Budget.rebalance(zeros, "housing", 250).housing, 100);
   near(Object.values(Budget.rebalance(zeros, "housing", -5)).reduce((a, b) => a + b, 0), 100, 1e-9);
 });
@@ -110,7 +110,7 @@ test("normalize: scales to 100 and handles an all-zero budget", () => {
 });
 
 test("rebalance with locks: locked categories never move, the rest absorb the change", () => {
-  const start = Budget.PRESETS["50/30/20"];
+  const start = Budget.PRESETS[Budget.DEFAULT_PRESET];
   const locked = { savings: true, housing: true };
   const p = Budget.rebalance(start, "groceries", 20, locked);
   near(p.savings, 20);
@@ -120,7 +120,7 @@ test("rebalance with locks: locked categories never move, the rest absorb the ch
 });
 
 test("rebalance with locks: value is capped to what the locked categories leave", () => {
-  const p = Budget.rebalance(Budget.PRESETS["50/30/20"], "groceries", 90, { savings: true, housing: true });
+  const p = Budget.rebalance(Budget.PRESETS[Budget.DEFAULT_PRESET], "groceries", 90, { savings: true, housing: true });
   near(p.groceries, 55); // 100 - 20 - 25
   near(p.dining, 0);
   near(Object.values(p).reduce((a, b) => a + b, 0), 100, 1e-9);
@@ -128,11 +128,11 @@ test("rebalance with locks: value is capped to what the locked categories leave"
 
 test("rebalance with locks: if everything else is locked, the changed category takes the remainder", () => {
   const locked = Object.fromEntries(Budget.CATEGORIES.filter((c) => c.id !== "dining" && c.id !== "shopping").map((c) => [c.id, true]));
-  const p = Budget.rebalance(Budget.PRESETS["50/30/20"], "dining", 5, locked);
-  near(p.dining + p.shopping, 30);
+  const p = Budget.rebalance(Budget.PRESETS[Budget.DEFAULT_PRESET], "dining", 5, locked);
+  near(p.dining + p.shopping, 20); // 100 minus everything locked (25+5+10+5+5+10+20)
   near(p.dining, 5);
   const onlyOne = Object.fromEntries(Budget.CATEGORIES.filter((c) => c.id !== "dining").map((c) => [c.id, true]));
-  near(Budget.rebalance(Budget.PRESETS["50/30/20"], "dining", 5, onlyOne).dining, 15);
+  near(Budget.rebalance(Budget.PRESETS[Budget.DEFAULT_PRESET], "dining", 5, onlyOne).dining, 10); // 100 minus the other eight (90)
 });
 
 test("normalize with locks keeps locked values and scales the rest", () => {
@@ -144,8 +144,8 @@ test("normalize with locks keeps locked values and scales the rest", () => {
 
 test("normalize with every category locked returns them unchanged (no NaN)", () => {
   const all = Object.fromEntries(Budget.CATEGORIES.map((c) => [c.id, true]));
-  const p = Budget.normalize(Budget.PRESETS["50/30/20"], all);
-  assert.deepEqual(p, Budget.PRESETS["50/30/20"]);
+  const p = Budget.normalize(Budget.PRESETS[Budget.DEFAULT_PRESET], all);
+  assert.deepEqual(p, Budget.PRESETS[Budget.DEFAULT_PRESET]);
 });
 
 test("paychecks: 26 a year, so a paycheck is smaller than a month's pay", () => {
@@ -156,7 +156,7 @@ test("paychecks: 26 a year, so a paycheck is smaller than a month's pay", () => 
 });
 
 test("rebalance: editing a locked category directly is allowed; unlocked ones absorb the change, other locked ones stay", () => {
-  const start = Budget.PRESETS["50/30/20"]; // housing 25, savings 20, ...
+  const start = Budget.PRESETS[Budget.DEFAULT_PRESET]; // housing 25, savings 20, donations 10, ...
   const locked = { housing: true, savings: true };
   const p = Budget.rebalance(start, "housing", 35, locked);
   near(p.housing, 35);          // the pinned category took the user's value
@@ -166,7 +166,24 @@ test("rebalance: editing a locked category directly is allowed; unlocked ones ab
 });
 
 test("rebalance: a locked category's edit is still capped by the other locked ones", () => {
-  const p = Budget.rebalance(Budget.PRESETS["50/30/20"], "housing", 95, { housing: true, savings: true });
+  const p = Budget.rebalance(Budget.PRESETS[Budget.DEFAULT_PRESET], "housing", 95, { housing: true, savings: true });
   near(p.housing, 80); // 100 - savings (20)
   near(p.savings, 20);
+});
+
+test("donations: a category defaulting to 10% of take-home in every preset and new scenarios", () => {
+  assert.ok(Budget.CATEGORIES.some((c) => c.id === "donations"));
+  for (const [name, p] of Object.entries(Budget.PRESETS)) assert.equal(p.donations, 10, name);
+  const s = Budget.createScenario();
+  assert.equal(s.percents.donations, 10);
+  const a = Budget.allocate(5000, s.percents);
+  near(a.rows.find((r) => r.id === "donations").amount, 500);
+});
+
+test("scenarios saved before donations existed total <100% rather than breaking", () => {
+  const old = { ...Budget.PRESETS[Budget.DEFAULT_PRESET] };
+  delete old.donations;
+  const a = Budget.allocate(5000, old);
+  near(a.unallocatedPct, 10);
+  near(a.rows.find((r) => r.id === "donations").pct, 0);
 });
