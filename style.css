@@ -101,3 +101,45 @@ button[aria-pressed=true]#editCats { background: var(--hearth); border-color: va
 .scenarios.editing .cat-name-input { display: block; }
 .scenarios.editing .cat-ctrls { display: inline-flex; }
 .scenarios.editing .cat-add { display: block; margin-top: 4px; }
+
+/* ---- budget vs. actual ---- */
+.compare { margin-top: 14px; border-top: 1px solid var(--border); padding-top: 10px; }
+.compare > summary { cursor: pointer; font-weight: 600; margin-bottom: 8px; }
+.compare-toggle { margin-bottom: 8px; }
+.compare-toggle button { padding: 3px 10px; font-size: 12px; }
+.compare-toggle button[aria-pressed=true] { background: var(--hearth); border-color: var(--hearth); color: var(--on-hearth); }
+table.cmp { width: 100%; border-collapse: collapse; font-size: 13px; }
+table.cmp th { font-weight: 400; text-align: left; padding: 2px 0; }
+table.cmp thead th { color: var(--muted); font-size: 12px; text-align: right; padding-left: 6px; }
+table.cmp thead th:first-child { text-align: left; }
+table.cmp td { text-align: right; padding: 2px 0 2px 6px; font-variant-numeric: tabular-nums; }
+table.cmp tfoot tr:first-child > * { border-top: 1px solid var(--border); font-weight: 700; padding-top: 4px; }
+table.cmp .strong { font-weight: 700; }
+table.cmp .notable { font-weight: 700; }
+table.cmp .over-cell { color: var(--over); }
+.compare-year { display: none; }
+.compare.show-year .compare-year { display: block; }
+.compare.show-year .compare-avg { display: none; }
+.ytd-inputs { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 4px; }
+.ytd-inputs label { display: grid; gap: 2px; font-size: 12px; color: var(--muted); }
+.compare-foot button { padding: 1px 8px; font-size: 12px; margin-left: 4px; }
+
+/* ---- import dialog ---- */
+dialog { background: var(--bg-elevated); color: var(--text); border: 1px solid var(--border); border-radius: 12px; padding: 18px 20px; max-width: min(760px, 94vw); width: 100%; box-sizing: border-box; }
+dialog::backdrop { background: rgba(0, 0, 0, 0.45); }
+dialog h2 { margin: 0 0 6px; font-size: 18px; }
+.import-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; margin: 10px 0; }
+.import-cols label { display: grid; gap: 2px; font-size: 12px; color: var(--muted); }
+.import-error { color: var(--over); font-size: 13px; min-height: 1em; margin: 6px 0 0; }
+.map-scroll { max-height: 42vh; overflow: auto; border: 1px solid var(--border); border-radius: 8px; }
+#mapTable { width: 100%; min-width: 600px; border-collapse: collapse; font-size: 13px; }
+#mapTable thead th { position: sticky; top: 0; background: var(--bg-elevated); text-align: left; font-weight: 500; color: var(--muted); font-size: 12px; padding: 4px 8px; }
+#mapTable tbody th { text-align: left; font-weight: 400; padding: 3px 8px; min-width: 120px; overflow-wrap: break-word; }
+#mapTable td { padding: 3px 8px; }
+#mapTable td:nth-child(2), #mapTable td:nth-child(3), #mapTable td.counted { font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+#mapTable select { max-width: 190px; }
+.flip { display: flex; gap: 4px; align-items: center; font-size: 12px; color: var(--muted); white-space: nowrap; }
+.import-total { font-weight: 600; margin: 10px 0 0; }
+.dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+button.primary { background: var(--hearth); border-color: var(--hearth); color: var(--on-hearth); }
+button.primary:disabled { opacity: 0.45; cursor: default; }

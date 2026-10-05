@@ -268,3 +268,64 @@ test("cleanCategories validates stored data", () => {
   assert.deepEqual(Budget.cleanCategories([{ id: "a", label: "A" }, { id: "a" }, { label: "x" }, { id: "b" }]),
     [{ id: "a", label: "A" }, { id: "b", label: "b" }]);
 });
+
+// ---- rest-of-year plan ---------------------------------------------------------
+
+const PLAN_CATS = [{ id: "a", label: "A" }, { id: "b", label: "B" }];
+const plan = (o) => Budget.planRestOfYear({ netMonthly: 5000, percents: { a: 60, b: 40 }, categories: PLAN_CATS, monthsCovered: 6, monthsLeft: 6, ...o });
+
+test("monthsLeftInYear counts from a date to Dec 31, never negative", () => {
+  near(Budget.monthsLeftInYear(Date.UTC(2026, 9, 4)), 2.9, 0.06);
+  assert.equal(Budget.monthsLeftInYear(Date.UTC(2026, 11, 31)), 0);
+  near(Budget.monthsLeftInYear(Date.UTC(2026, 0, 1)), 12, 0.06);
+});
+
+test("plan: spending exactly on budget keeps the same monthly budget going forward", () => {
+  const p = plan({ spent: { a: 18000, b: 12000 } });
+  near(p.pot, 60000);
+  near(p.available, 30000);
+  near(p.rows[0].perMonth, 3000);
+  near(p.rows[1].perMonth, 2000);
+  assert.equal(p.scale, 1);
+  assert.equal(p.broke, false);
+  near(p.unallocated, 0);
+});
+
+test("plan: a category that blew its months gets less later and the under-spent one gets more (the year evens out)", () => {
+  const p = plan({ spent: { a: 25000, b: 5000 } }); // A over its half-year share, B well under
+  near(p.rows[0].remaining, 11000);
+  near(p.rows[1].remaining, 19000);
+  near(p.rows[0].perMonth, 11000 / 6);
+  near(p.rows[1].perMonth, 19000 / 6);
+  near(p.rows[0].perMonth + p.rows[1].perMonth, 5000); // still spends exactly the monthly take-home
+});
+
+test("plan: a category already over its whole-year target gets 0, and the rest scale to the money really left", () => {
+  const p = plan({ spent: { a: 40000, b: 5000 } }); // A is 4000 past its annual 36000
+  assert.equal(p.rows[0].over, true);
+  assert.equal(p.rows[0].perMonth, 0);
+  near(p.overspent, 4000);
+  near(p.available, 15000);          // 30000 still to come + (30000 received - 45000 spent)
+  near(p.scale, 15000 / 19000);
+  near(p.rows[1].perMonth, 15000 / 6);
+});
+
+test("plan: when more has been spent than there is income, nothing is available", () => {
+  const p = plan({ spent: { a: 50000, b: 20000 } });
+  assert.equal(p.broke, true);
+  assert.ok(p.available < 0);
+  assert.ok(p.rows.every((r) => r.perMonth === 0));
+});
+
+test("plan: received / to-come overrides replace the estimates; percents under 100 leave money unallocated", () => {
+  const p = plan({ spent: { a: 10000, b: 10000 }, received: 40000, toCome: 20000, percents: { a: 50, b: 30 } });
+  near(p.pot, 60000);
+  near(p.available, 20000 + (40000 - 20000));
+  near(p.rows[0].remaining, 30000 - 10000);
+  assert.ok(p.unallocated > 0); // 20% of the pot isn't assigned to any category
+});
+
+test("plan: the year being over (or no months left) returns ended instead of dividing by zero", () => {
+  assert.deepEqual(plan({ spent: {}, monthsLeft: 0 }), { ended: true });
+  assert.deepEqual(plan({ spent: {}, monthsLeft: 0.04 }), { ended: true });
+});

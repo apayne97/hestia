@@ -47,4 +47,25 @@ scenarios (file format version 2; older version-1 files still load). Deleting a
 category removes its percentage from every scenario; presets adapt to whatever
 categories exist.
 
+## Importing what you actually spent
+
+"Import spending" reads a categorized CSV (an Amount and a Category column, plus
+an optional Date) and compares it with each scenario's theoretical budget.
+
+- **Privacy:** the file is parsed in the browser. Individual transactions are
+  never stored, synced or sent anywhere; only per-category totals, the date range
+  and the number of months are kept (in this browser and, if you connect Drive, in
+  your own Drive file). `*.csv` is in `.gitignore` so a real export can't be
+  committed by accident. Tests use made-up data only.
+- **Mapping:** each CSV category is netted (a refund cancels a purchase) and counts
+  as spending when the net is positive. You choose where each one goes (an existing
+  category, a new one, or ignore, e.g. for transfers). Tick "flip" for a category
+  whose spending is negative in your export. Choices are remembered.
+- **Monthly average:** actual spend per month next to each scenario's budget.
+- **Rest of year:** each category's target is its % of *all* the take-home for the
+  period (received so far + still to come). Remaining = target - spent so far, scaled
+  down if it exceeds the money you really have left. A month that blew one category
+  (paid for out of savings) shows up as less room there later and more elsewhere, so
+  the year evens out. "Received so far" and "still to come" can be overridden.
+
 Roadmap: mobile layout.

@@ -33,7 +33,7 @@ test("serializeState / parseState round-trip", () => {
   const scenarios = [{ id: "a", name: "Job A", salary: 90000, locked: { savings: true } }];
   const categories = [{ id: "housing", label: "Rent" }, { id: "c1", label: "Pets" }];
   const parsed = parseState(serializeState({ scenarios, categories, updatedAt: 1234 }));
-  assert.deepEqual(parsed, { scenarios, categories, updatedAt: 1234 });
+  assert.deepEqual(parsed, { scenarios, categories, actuals: null, updatedAt: 1234 });
 });
 
 test("parseState: empty file is null; foreign or broken JSON is refused", () => {
@@ -154,7 +154,7 @@ test("non-401 failures carry the HTTP status so callers can react to a 404", asy
 
 test("parseState: a version-1 file (no categories) still loads, with categories null", () => {
   const v1 = JSON.stringify({ app: "hestia", version: 1, updatedAt: 99, scenarios: [{ id: "a" }] });
-  assert.deepEqual(parseState(v1), { scenarios: [{ id: "a" }], categories: null, updatedAt: 99 });
+  assert.deepEqual(parseState(v1), { scenarios: [{ id: "a" }], categories: null, actuals: undefined, updatedAt: 99 });
 });
 
 test("parseState: malformed categories are dropped or ignored rather than trusted", () => {
@@ -163,4 +163,21 @@ test("parseState: malformed categories are dropped or ignored rather than truste
   const mixed = parseState(JSON.stringify({ ...base, categories: [{ id: "a", label: "A" }, { id: "a", label: "dup" }, { label: "no id" }, null, { id: "b" }] }));
   assert.deepEqual(mixed.categories, [{ id: "a", label: "A" }, { id: "b", label: "b" }]);
   assert.deepEqual(parseState(JSON.stringify({ ...base, categories: [] })).categories, []); // user deleted them all
+});
+
+test("actuals round-trip through the Drive file; a file without them parses as undefined, a cleared one as null", () => {
+  const actuals = { totals: { groceries: 300, dining: 120 }, months: 3, start: "2026-01-01", end: "2026-03-31", importedAt: "2026-04-02T10:00:00.000Z" };
+  const parsed = parseState(serializeState({ scenarios: [], categories: [], actuals, updatedAt: 5 }));
+  assert.deepEqual(parsed.actuals, actuals);
+  assert.equal(parseState(serializeState({ scenarios: [], categories: [], actuals: null, updatedAt: 5 })).actuals, null);
+  assert.equal(parseState(JSON.stringify({ app: "hestia", version: 2, updatedAt: 1, scenarios: [] })).actuals, undefined);
+});
+
+test("cleanActuals drops junk: non-positive or non-numeric totals, bad months, malformed dates", () => {
+  const { cleanActuals } = require("../sync.js");
+  assert.equal(cleanActuals(null), null);
+  assert.equal(cleanActuals({ totals: {}, months: 0 }), null);
+  assert.equal(cleanActuals("x"), null);
+  const c = cleanActuals({ totals: { a: 10, b: -5, c: "x", d: "7" }, months: "2", start: "last week", end: "2026-02-01" });
+  assert.deepEqual(c, { totals: { a: 10, d: 7 }, months: 2, start: null, end: "2026-02-01", importedAt: null });
 });

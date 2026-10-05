@@ -44,6 +44,8 @@ function createScenario(overrides = {}) {
     stateRate: 0,
     pretax401kPct: 0,
     healthMonthly: 0,
+    ytdReceived: null, // take-home received so far in the imported period; null = estimate from monthly take-home x months covered
+    ytdToCome: null,   // take-home still to come before year end; null = estimate from monthly take-home x months left
     locked: {}, // "pinned" category ids: auto-balancing never moves them (you can still edit them yourself). While any category is pinned, the total is held at 100%.
     percents: { ...PRESETS[DEFAULT_PRESET] },
     ...overrides,
@@ -174,6 +176,59 @@ function normalize(percents, locked = {}, categories = DEFAULT_CATEGORIES) {
   return out;
 }
 
+// ---- rest-of-year plan ----------------------------------------------------------
+
+// Months from a date (ms, UTC) to the end of that calendar year, one decimal, never negative.
+function monthsLeftInYear(asOfMs) {
+  const d = new Date(asOfMs);
+  const yearEnd = Date.UTC(d.getUTCFullYear(), 11, 31);
+  return Math.max(0, Math.round(((yearEnd - asOfMs) / 86400000 / 30.4375) * 10) / 10);
+}
+
+// Re-plan the rest of the year from what's actually been spent.
+//
+//   pot       = take-home received so far + take-home still to come
+//   target    = each category's % of the pot (the year's budget for it)
+//   remaining = target - spent so far            (negative = already over)
+//   available = what's really left to allocate = still to come + (received - spent in total)
+//
+// Each category's plan is its remaining envelope (never below 0). If those add
+// up to more than is really available, they're scaled down together so the plan
+// fits the money you actually have; if nothing is available, every plan is 0.
+// That way a month that blew one category (paid for out of savings) just shows up
+// as less room in that category later and more in the ones that were under.
+//
+//   spent: { categoryId: dollars spent over the period so far }
+//   received / toCome: optional overrides; default netMonthly x monthsCovered / x monthsLeft
+// → { ended: true } when the year is (nearly) over, else
+//   { pot, received, toCome, spentTotal, available, scale, broke, overspent, unallocated, monthsLeft,
+//     rows: [{ id, label, pct, target, spent, remaining, perMonth, over }] }   (perMonth: dollars per remaining month)
+function planRestOfYear({ netMonthly, percents, categories = DEFAULT_CATEGORIES, spent, monthsCovered, monthsLeft, received = null, toCome = null }) {
+  if (!(monthsLeft > 0.05)) return { ended: true };
+  const rec = Number.isFinite(received) ? received : netMonthly * monthsCovered;
+  const left = Number.isFinite(toCome) ? toCome : netMonthly * monthsLeft;
+  const pot = rec + left;
+  const spentOf = (id) => Number(spent[id]) || 0;
+  const spentTotal = categories.reduce((sum, c) => sum + spentOf(c.id), 0);
+  const available = left + rec - spentTotal;
+  const rows = categories.map(({ id, label }) => {
+    const pct = Number(percents[id]) || 0;
+    const target = (pot * pct) / 100;
+    const remaining = target - spentOf(id);
+    return { id, label, pct, target, spent: spentOf(id), remaining, over: remaining < 0 };
+  });
+  const positives = rows.reduce((sum, r) => sum + Math.max(0, r.remaining), 0);
+  const scale = available > 0 && positives > 0 ? Math.min(1, available / positives) : available > 0 ? 1 : 0;
+  for (const r of rows) r.perMonth = (Math.max(0, r.remaining) * scale) / monthsLeft;
+  const planned = rows.reduce((sum, r) => sum + r.perMonth * monthsLeft, 0);
+  return {
+    ended: false, pot, received: rec, toCome: left, spentTotal, available, scale, monthsLeft, rows,
+    broke: available <= 0,
+    overspent: rows.reduce((sum, r) => sum + Math.max(0, -r.remaining), 0),
+    unallocated: Math.max(0, available - planned),
+  };
+}
+
 // Max monthly rent by two common rules of thumb, both from GROSS income:
 // rent ≤ 30% of gross monthly, and landlords' "annual income ≥ 40× rent".
 function rentRules(grossAnnual) {
@@ -184,6 +239,6 @@ function rentRules(grossAnnual) {
 const Budget = {
   PAY_PERIODS_PER_YEAR, DEFAULT_CATEGORIES, PRESETS, DEFAULT_PRESET,
   createScenario, applyPreset, addCategory, renameCategory, moveCategory, removeCategory, dropCategory, cleanCategories,
-  allocate, rebalance, normalize, rentRules,
+  allocate, rebalance, normalize, rentRules, monthsLeftInYear, planRestOfYear,
 };
 if (typeof module !== "undefined" && module.exports) module.exports = Budget;

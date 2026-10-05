@@ -5,6 +5,9 @@
 // Categories (the budget's rows) are shared by every scenario and editable.
 const STORAGE_KEY = "hestia-scenarios-v1";
 const CATS_KEY = "hestia-categories-v1";
+const ACTUALS_KEY = "hestia-actuals-v1";   // per-category spending totals from an imported CSV (never the transactions)
+const CSVMAP_KEY = "hestia-csv-mapping-v1"; // remembered CSV category -> budget category choices
+const COMPARE_KEY = "hestia-compare";
 const money = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 const pctFmt = new Intl.NumberFormat("en-US", { maximumFractionDigits: 1 });
 
@@ -36,6 +39,9 @@ let viewMode = "percent"; // "percent" | "dollar": which column of each category
 try { if (localStorage.getItem(VIEW_KEY) === "dollar") viewMode = "dollar"; } catch (e) { /* ignore */ }
 
 let categories = loadCategories();
+let actuals = loadActuals(); // { totals: {categoryId: $ over the period}, months, start, end, importedAt } | null
+let compareMode = "avg";     // "avg" (monthly average vs budget) | "year" (re-plan the rest of the year)
+try { if (localStorage.getItem(COMPARE_KEY) === "year") compareMode = "year"; } catch (e) { /* ignore */ }
 let editingCats = false; // "Edit categories" mode: rows show rename / move / delete instead of the numbers
 let scenarios = loadScenarios();
 const root = document.getElementById("scenarios");
@@ -46,6 +52,10 @@ function loadCategories() {
     if (cats) return cats;
   } catch (e) { /* no storage, or corrupt — fall through to the defaults */ }
   return Budget.DEFAULT_CATEGORIES.map((c) => ({ ...c }));
+}
+
+function loadActuals() {
+  try { return cleanActuals(JSON.parse(localStorage.getItem(ACTUALS_KEY))); } catch (e) { return null; }
 }
 
 // A scenario whose percentages start from the default preset over the CURRENT categories.
@@ -68,6 +78,8 @@ function save() {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(scenarios));
     localStorage.setItem(CATS_KEY, JSON.stringify(categories));
+    if (actuals) localStorage.setItem(ACTUALS_KEY, JSON.stringify(actuals));
+    else localStorage.removeItem(ACTUALS_KEY);
   } catch (e) { /* private mode etc */ }
   lsSet(LS.updated, String(Date.now()));
   schedulePush();
@@ -108,7 +120,7 @@ async function pushNow() {
   if (!stamp) { stamp = Date.now(); lsSet(LS.updated, String(stamp)); }
   renderDriveUI("Saving to Drive…");
   try {
-    await drive.write(driveFileId, serializeState({ scenarios, categories, updatedAt: stamp }));
+    await drive.write(driveFileId, serializeState({ scenarios, categories, actuals, updatedAt: stamp }));
     lsSet(LS.synced, String(stamp));
     lastSyncAt = new Date();
     renderDriveUI();
@@ -118,8 +130,10 @@ async function pushNow() {
 function applyPull(remote) {
   scenarios = remote.scenarios.map((s) => ({ ...Budget.createScenario(), ...s }));
   if (remote.categories) categories = remote.categories; // a version-1 Drive file has none: keep ours
+  if (remote.actuals !== undefined) actuals = remote.actuals; // undefined = an older file that predates actuals: keep ours
   lsSet(STORAGE_KEY, JSON.stringify(scenarios));
   lsSet(CATS_KEY, JSON.stringify(categories));
+  if (actuals) lsSet(ACTUALS_KEY, JSON.stringify(actuals)); else lsDel(ACTUALS_KEY);
   lsSet(LS.updated, String(remote.updatedAt));
   lsSet(LS.synced, String(remote.updatedAt));
   render();
@@ -289,6 +303,39 @@ function buildCard(s) {
       </div>
       <div class="cat-add"><button type="button" data-action="cat-add">＋ Add category</button></div>
     </div>
+    <details class="compare hidden" open>
+      <summary>Budget vs. what you actually spent</summary>
+      <div class="seg compare-toggle" role="group" aria-label="Comparison view">
+        <button type="button" data-compare="avg">Monthly average</button><button type="button" data-compare="year">Rest of year</button>
+      </div>
+      <div class="compare-avg">
+        <table class="cmp">
+          <thead><tr><th></th><th>Budget</th><th>Actual</th><th title="Actual minus budget, per month">Diff</th></tr></thead>
+          <tbody></tbody>
+          <tfoot></tfoot>
+        </table>
+      </div>
+      <div class="compare-year">
+        <div class="ytd-inputs">
+          <label>Take-home received so far
+            <input type="number" min="0" step="100" data-field="ytdReceived" placeholder="auto">
+          </label>
+          <label>Take-home still to come
+            <input type="number" min="0" step="100" data-field="ytdToCome" placeholder="auto">
+          </label>
+        </div>
+        <p class="muted" data-out="ytd-note"></p>
+        <table class="cmp">
+          <thead><tr><th></th><th title="Your % of all take-home for the period">Target</th><th>Spent</th><th title="Target minus spent (negative = already over)">Left</th><th title="What to spend per remaining month">Per month</th></tr></thead>
+          <tbody></tbody>
+          <tfoot></tfoot>
+        </table>
+        <p class="muted" data-out="ytd-summary"></p>
+      </div>
+      <p class="muted compare-foot"><span data-out="actuals-note"></span>
+        <button type="button" data-action="import-open">Re-import</button>
+        <button type="button" data-action="actuals-clear">Clear</button></p>
+    </details>
     <div class="rent">
       <h3>What rent can you afford?</h3>
       <div class="rent-row"><span>Your housing slice</span><b data-rent="slice"></b></div>
@@ -302,6 +349,8 @@ function buildCard(s) {
   card.querySelector('[data-field="stateRate"]').value = s.stateRate;
   card.querySelector('[data-field="pretax401kPct"]').value = s.pretax401kPct;
   card.querySelector('[data-field="healthMonthly"]').value = s.healthMonthly;
+  card.querySelector('[data-field="ytdReceived"]').value = s.ytdReceived ?? "";
+  card.querySelector('[data-field="ytdToCome"]').value = s.ytdToCome ?? "";
   const unalloc = card.querySelector(".unalloc");
   for (const c of categories) unalloc.before(buildCatRow(c));
   refresh(card, s);
@@ -409,6 +458,8 @@ function refresh(card, s) {
   marker.innerHTML = fixed ? LOCK_ICON : "";
   marker.classList.toggle("on", fixed);
 
+  refreshCompare(card, s, t, a);
+
   const rent = Budget.rentRules(t.gross);
   const housing = a.rows.find((r) => r.id === "housing"); // the user may have deleted the Housing category
   setText(card, '[data-rent="slice"]', housing ? money.format(housing.amount) + "/mo" : "—");
@@ -425,6 +476,218 @@ function renameCategoryLive(input) {
   save();
 }
 
+// ---- budget vs. actual -----------------------------------------------------------
+
+const signed = (n) => (Math.abs(n) < 0.5 ? money.format(0) : (n > 0 ? "+" : "−") + money.format(Math.abs(n)));
+const longDate = (iso) => (iso ? new Date(iso + "T00:00:00Z").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" }) : null);
+
+function rowHtml(cells, cls = "") {
+  return `<tr class="${cls}">${cells.map((c, i) => `<${i ? "td" : "th"}${c.cls ? ` class="${c.cls}"` : ""}>${c.text}</${i ? "td" : "th"}>`).join("")}</tr>`;
+}
+const esc = (s) => String(s).replace(/[&<>"]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch]));
+
+function refreshCompare(card, s, t, a) {
+  const box = card.querySelector(".compare");
+  box.classList.toggle("hidden", !actuals);
+  if (!actuals) return;
+  for (const btn of box.querySelectorAll("[data-compare]")) btn.setAttribute("aria-pressed", String(btn.dataset.compare === compareMode));
+  box.classList.toggle("show-year", compareMode === "year");
+  const months = actuals.months;
+  const when = actuals.start && actuals.end ? ` (${longDate(actuals.start)} – ${longDate(actuals.end)})` : "";
+  setText(card, '[data-out="actuals-note"]', `Imported ${longDate((actuals.importedAt || "").slice(0, 10)) || "earlier"}: ${pctFmt.format(months)} months of spending${when}. Only totals are kept, never the transactions.`);
+
+  // monthly average vs budget
+  const spentPerMonth = (id) => (actuals.totals[id] || 0) / months;
+  let budgetSum = 0, actualSum = 0;
+  const body = a.rows.map((r) => {
+    const actual = spentPerMonth(r.id);
+    budgetSum += r.amount; actualSum += actual;
+    const diff = actual - r.amount;
+    const notable = Math.abs(diff) >= 25 && Math.abs(diff) >= 0.1 * r.amount;
+    return rowHtml([{ text: esc(r.label) }, { text: money.format(r.amount) }, { text: money.format(actual) }, { text: signed(diff), cls: notable ? "notable" : "" }]);
+  }).join("");
+  box.querySelector(".compare-avg tbody").innerHTML = body;
+  box.querySelector(".compare-avg tfoot").innerHTML =
+    rowHtml([{ text: "Total spending" }, { text: money.format(budgetSum) }, { text: money.format(actualSum) }, { text: signed(actualSum - budgetSum) }], "total") +
+    rowHtml([{ text: "Left of take-home" }, { text: money.format(t.netMonthly - budgetSum) }, { text: money.format(t.netMonthly - actualSum) }, { text: "" }]);
+
+  // rest of year
+  const endMs = actuals.end ? Csv.fromIsoDate(actuals.end) : Date.now();
+  const monthsLeft = Budget.monthsLeftInYear(endMs);
+  const plan = Budget.planRestOfYear({
+    netMonthly: t.netMonthly, percents: s.percents, categories, spent: actuals.totals, monthsCovered: months, monthsLeft,
+    received: s.ytdReceived, toCome: s.ytdToCome,
+  });
+  const recInput = box.querySelector('[data-field="ytdReceived"]');
+  const comeInput = box.querySelector('[data-field="ytdToCome"]');
+  recInput.placeholder = money.format(t.netMonthly * months);
+  comeInput.placeholder = money.format(t.netMonthly * monthsLeft);
+  const yearBody = box.querySelector(".compare-year tbody"), yearFoot = box.querySelector(".compare-year tfoot");
+  if (plan.ended) {
+    yearBody.innerHTML = ""; yearFoot.innerHTML = "";
+    setText(card, '[data-out="ytd-note"]', "");
+    setText(card, '[data-out="ytd-summary"]', `The year is over as of ${longDate(actuals.end) || "the last transaction"}, so there is nothing left to plan. Import newer spending to plan next year.`);
+    return;
+  }
+  setText(card, '[data-out="ytd-note"]',
+    `${pctFmt.format(months)} months covered + ${pctFmt.format(plan.monthsLeft)} left in the year. All the take-home in that time: ${money.format(plan.received)} received + ${money.format(plan.toCome)} still to come = ${money.format(plan.pot)}.`);
+  yearBody.innerHTML = plan.rows.map((r) =>
+    rowHtml([{ text: esc(r.label) }, { text: money.format(r.target) }, { text: money.format(r.spent) },
+      { text: r.over ? `−${money.format(-r.remaining)}` : money.format(r.remaining), cls: r.over ? "over-cell" : "" },
+      { text: money.format(r.perMonth), cls: "strong" }])).join("");
+  const sum = (k) => plan.rows.reduce((x, r) => x + r[k], 0);
+  yearFoot.innerHTML = rowHtml([{ text: "Total" }, { text: money.format(sum("target")) }, { text: money.format(sum("spent")) },
+    { text: signed(sum("remaining")) }, { text: money.format(sum("perMonth")), cls: "strong" }], "total");
+  const notes = [];
+  notes.push(plan.broke
+    ? "You have already spent more than all your take-home for this period, so there is nothing left to allocate."
+    : `You really have ${money.format(plan.available)} left to allocate (still to come, plus what you haven't spent so far).`);
+  if (plan.scale < 1 && !plan.broke) notes.push(`The plan is scaled to ${pctFmt.format(plan.scale * 100)}% of the remaining envelopes so it fits that money.`);
+  if (plan.overspent > 0.5) notes.push(`${money.format(plan.overspent)} is already over target across categories; those get nothing more.`);
+  if (plan.unallocated > 0.5 && !plan.broke) notes.push(`${money.format(plan.unallocated)} isn't assigned to any category (your percentages add up to less than 100%).`);
+  setText(card, '[data-out="ytd-summary"]', notes.join(" "));
+}
+
+// ---- CSV import ----------------------------------------------------------------
+
+const dlg = {
+  el: document.getElementById("importDialog"), file: document.getElementById("csvFile"), body: document.getElementById("importBody"),
+  amount: document.getElementById("colAmount"), category: document.getElementById("colCategory"), date: document.getElementById("colDate"),
+  months: document.getElementById("importMonths"), summary: document.getElementById("importSummary"), map: document.querySelector("#mapTable tbody"),
+  total: document.getElementById("importTotal"), go: document.getElementById("importGo"), error: document.getElementById("importError"),
+};
+let imp = null; // { header, data, summary } while the dialog is open — the parsed file lives only here, in memory
+
+const loadMapping = () => { try { return JSON.parse(localStorage.getItem(CSVMAP_KEY)) || {}; } catch (e) { return {}; } };
+
+function openImport() {
+  imp = null;
+  dlg.file.value = "";
+  dlg.body.classList.add("hidden");
+  dlg.error.textContent = "";
+  dlg.go.disabled = true;
+  dlg.el.showModal();
+}
+
+function closeImport() {
+  imp = null; // drop the parsed rows
+  dlg.map.innerHTML = "";
+  dlg.el.close();
+}
+
+dlg.file.addEventListener("change", async () => {
+  const file = dlg.file.files[0];
+  if (!file) return;
+  dlg.error.textContent = "";
+  try {
+    const rows = Csv.parseCsv(await file.text());
+    if (rows.length < 2) throw new Error("That file has no data rows.");
+    const { headerIndex, header, columns } = Csv.findHeader(rows);
+    imp = { header, data: rows.slice(headerIndex + 1), summary: null };
+    const options = (withNone) => (withNone ? '<option value="-1">(none)</option>' : '<option value="-1">Choose…</option>') +
+      header.map((h, i) => `<option value="${i}">${esc(h || `Column ${i + 1}`)}</option>`).join("");
+    dlg.amount.innerHTML = options(false); dlg.category.innerHTML = options(false); dlg.date.innerHTML = options(true);
+    dlg.amount.value = columns.amount; dlg.category.value = columns.category; dlg.date.value = columns.date;
+    dlg.body.classList.remove("hidden");
+    analyzeImport(true);
+  } catch (e) {
+    imp = null;
+    dlg.body.classList.add("hidden");
+    dlg.go.disabled = true;
+    dlg.error.textContent = e.message || "Couldn't read that file.";
+  }
+});
+
+for (const sel of [dlg.amount, dlg.category, dlg.date]) sel.addEventListener("change", () => analyzeImport(true));
+dlg.months.addEventListener("input", updateImportTotals);
+
+// (Re)read the chosen columns: total per CSV category and propose where each goes.
+function analyzeImport(resetMonths) {
+  if (!imp) return;
+  const cols = { amount: Number(dlg.amount.value), category: Number(dlg.category.value), date: Number(dlg.date.value) };
+  if (cols.amount < 0 || cols.category < 0) { dlg.map.innerHTML = ""; dlg.summary.textContent = "Choose the Amount and Category columns."; dlg.go.disabled = true; return; }
+  imp.summary = Csv.summarize(imp.data, cols);
+  const sm = imp.summary;
+  if (resetMonths) dlg.months.value = Csv.spanMonths(sm.minDate, sm.maxDate) ?? 1;
+  const dates = sm.minDate !== null ? ` from ${longDate(Csv.toIsoDate(sm.minDate))} to ${longDate(Csv.toIsoDate(sm.maxDate))}` : " (no usable dates, so enter how many months it covers)";
+  dlg.summary.textContent = `Read ${sm.read} transactions${dates}${sm.skipped ? `; skipped ${sm.skipped} rows without a numeric amount` : ""}.`;
+  const memory = loadMapping();
+  dlg.map.innerHTML = sm.categories.map((c, i) => {
+    const remembered = memory[c.key];
+    const known = remembered && (remembered.target === "ignore" || remembered.target === "new" || categories.some((x) => x.id === remembered.target));
+    const target = known ? remembered.target : Csv.suggestTarget(c.name, categories);
+    const flip = known ? !!remembered.flip : false;
+    const opts = categories.map((x) => `<option value="${esc(x.id)}"${x.id === target ? " selected" : ""}>${esc(x.label)}</option>`).join("") +
+      `<option value="new"${target === "new" ? " selected" : ""}>＋ New category</option><option value="ignore"${target === "ignore" ? " selected" : ""}>Ignore</option>`;
+    return `<tr data-i="${i}"><th>${esc(c.name)}</th><td>${c.count}</td><td>${money.format(c.net)}</td>
+      <td><select data-map aria-label="Where ${esc(c.name)} goes">${opts}</select></td>
+      <td><label class="flip" title="Tick if this category's spending appears as negative amounts"><input type="checkbox" data-flip${flip ? " checked" : ""}> flip</label></td>
+      <td class="counted" data-counted></td></tr>`;
+  }).join("");
+  updateImportTotals();
+}
+
+// The dollars each CSV category contributes, given the current mapping/flip/months.
+function importChoices() {
+  const mapping = {}, flip = {};
+  for (const tr of dlg.map.querySelectorAll("tr")) {
+    const c = imp.summary.categories[Number(tr.dataset.i)];
+    mapping[c.key] = tr.querySelector("[data-map]").value;
+    flip[c.key] = tr.querySelector("[data-flip]").checked;
+  }
+  return { mapping, flip };
+}
+
+function updateImportTotals() {
+  if (!imp || !imp.summary) return;
+  const months = Number(dlg.months.value) > 0 ? Number(dlg.months.value) : 1;
+  const { mapping, flip } = importChoices();
+  let grand = 0;
+  for (const tr of dlg.map.querySelectorAll("tr")) {
+    const c = imp.summary.categories[Number(tr.dataset.i)];
+    const net = flip[c.key] ? -c.net : c.net;
+    const counted = mapping[c.key] !== "ignore" && net > 0 ? net : 0;
+    grand += counted;
+    tr.querySelector("[data-counted]").textContent = counted ? `${money.format(counted / months)}/mo` : (mapping[c.key] === "ignore" ? "ignored" : "not spending");
+  }
+  dlg.total.textContent = `${money.format(grand / months)} per month counted as spending (${money.format(grand)} over ${pctFmt.format(months)} months)`;
+  dlg.go.disabled = grand <= 0;
+}
+
+dlg.map.addEventListener("change", updateImportTotals);
+
+dlg.go.addEventListener("click", () => {
+  if (!imp || !imp.summary) return;
+  const { mapping, flip } = importChoices();
+  const months = Number(dlg.months.value) > 0 ? Number(dlg.months.value) : 1;
+  const memory = loadMapping();
+  for (const c of imp.summary.categories) {
+    memory[c.key] = { target: mapping[c.key], flip: flip[c.key] };
+    const net = flip[c.key] ? -c.net : c.net;
+    if (mapping[c.key] === "new") {
+      if (net > 0) { // only spending categories earn a new row
+        categories = Budget.addCategory(categories, c.name);
+        mapping[c.key] = categories[categories.length - 1].id;
+      } else mapping[c.key] = "ignore";
+    }
+  }
+  try { localStorage.setItem(CSVMAP_KEY, JSON.stringify(memory)); } catch (e) { /* ignore */ }
+  const built = Csv.buildActuals(imp.summary, { mapping, flip }, months);
+  const sm = imp.summary;
+  actuals = {
+    totals: built.totals, months: built.months,
+    start: sm.minDate !== null ? Csv.toIsoDate(sm.minDate) : null,
+    end: sm.maxDate !== null ? Csv.toIsoDate(sm.maxDate) : Csv.toIsoDate(Date.now()),
+    importedAt: new Date().toISOString(),
+  };
+  save();
+  render();
+  closeImport();
+});
+document.getElementById("importCancel").addEventListener("click", closeImport);
+dlg.el.addEventListener("cancel", () => { imp = null; });
+document.getElementById("importOpen").addEventListener("click", openImport);
+
 function render() {
   root.replaceChildren(...scenarios.map(buildCard));
   for (const btn of root.querySelectorAll("[data-view]")) btn.setAttribute("aria-pressed", String(btn.dataset.view === viewMode));
@@ -438,7 +701,9 @@ root.addEventListener("input", (e) => {
   if ("catname" in e.target.dataset) { renameCategoryLive(e.target); return; }
   const s = find(card);
   const field = e.target.dataset.field;
-  if (field) {
+  if (field === "ytdReceived" || field === "ytdToCome") {
+    s[field] = e.target.value === "" ? null : Number(e.target.value); // empty = estimate automatically
+  } else if (field) {
     s[field] = e.target.type === "number" ? Number(e.target.value) : e.target.value;
   } else if (e.target.dataset.role) {
     const id = e.target.closest(".cat[data-cat]").dataset.cat;
@@ -471,6 +736,14 @@ root.addEventListener("click", (e) => {
   const actionEl = e.target.closest("[data-action]"); // a click on the icon's <svg> must still count
   const action = actionEl && actionEl.dataset.action;
   const card = e.target.closest(".card");
+  if (action === "import-open") { openImport(); return; }
+  if (action === "actuals-clear") {
+    if (!confirm("Clear the imported spending? Your budgets stay as they are.")) return;
+    actuals = null;
+    save();
+    render();
+    return;
+  }
   if (action === "cat-add") {
     categories = Budget.addCategory(categories);
     const newId = categories[categories.length - 1].id;
@@ -488,6 +761,7 @@ root.addEventListener("click", (e) => {
       const label = (categories.find((c) => c.id === id) || {}).label || "this category";
       if (!confirm(`Delete “${label}”? Its percentages are removed from every scenario.`)) return;
       categories = Budget.removeCategory(categories, id);
+      if (actuals) delete actuals.totals[id];
       // freed percent becomes Unallocated — unless something is pinned, which holds the total at 100%
       scenarios = scenarios.map((s) => {
         const t = Budget.dropCategory(s, id);
@@ -549,6 +823,12 @@ function setView(mode) {
 root.addEventListener("click", (e) => {
   const btn = e.target.closest("[data-view]");
   if (btn) setView(btn.dataset.view);
+  const cmp = e.target.closest("[data-compare]");
+  if (cmp) {
+    compareMode = cmp.dataset.compare;
+    try { localStorage.setItem(COMPARE_KEY, compareMode); } catch (err) { /* ignore */ }
+    for (const card of root.children) refresh(card, find(card));
+  }
 });
 
 render();

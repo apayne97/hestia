@@ -17,6 +17,7 @@
   <button type="button" id="driveBtn">Connect Google Drive</button>
   <button type="button" id="driveFolder" class="hidden">Change folder</button>
   <button type="button" id="driveOff" class="hidden">Disconnect</button>
+  <button type="button" id="importOpen">Import spending</button>
   <button type="button" id="editCats" aria-pressed="false">Edit categories</button>
   <button type="button" id="addScenario">+ Add scenario</button>
   <button type="button" class="theme-toggle" id="themeToggle" title="Toggle light/dark"></button>
@@ -28,10 +29,38 @@
     deductions or credits) — good for comparing offers, not for filing. Percentages are of take-home pay.
   </p>
 </main>
+<dialog id="importDialog" aria-labelledby="importTitle">
+  <h2 id="importTitle">Import what you actually spent</h2>
+  <p class="muted">Pick a categorized CSV with an Amount and a Category column (a Date column is optional). The file is read right here in your browser. Individual transactions are never stored or sent anywhere; only per-category totals are kept.</p>
+  <input type="file" id="csvFile" accept=".csv,.txt,text/csv">
+  <p class="import-error" id="importError" role="alert"></p>
+  <div id="importBody" class="hidden">
+    <div class="import-cols">
+      <label>Amount column <select id="colAmount"></select></label>
+      <label>Category column <select id="colCategory"></select></label>
+      <label>Date column <select id="colDate"></select></label>
+      <label>Months covered <input type="number" id="importMonths" min="0.1" step="0.1"></label>
+    </div>
+    <p class="muted" id="importSummary"></p>
+    <p class="muted">Each CSV category's amounts are netted (a refund cancels a purchase). It counts as spending only when the net is positive; tick <b>flip</b> if that category shows spending as negative amounts. Choose where each one goes, or ignore transfers.</p>
+    <div class="map-scroll">
+      <table id="mapTable">
+        <thead><tr><th>CSV category</th><th>Rows</th><th>Net</th><th>Goes to</th><th></th><th>Counts as</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <p id="importTotal" class="import-total"></p>
+  </div>
+  <div class="dialog-actions">
+    <button type="button" id="importCancel">Cancel</button>
+    <button type="button" id="importGo" class="primary" disabled>Import</button>
+  </div>
+</dialog>
 <script src="tax.js"></script>
 <script src="gdrive.js"></script>
 <script src="sync.js"></script>
 <script src="budget.js"></script>
+<script src="csv.js"></script>
 <script src="theme.js"></script>
 <script src="app.js"></script>
 </body>
