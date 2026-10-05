@@ -144,7 +144,8 @@ dialog h2 { margin: 0 0 6px; font-size: 18px; }
 button.primary { background: var(--hearth); border-color: var(--hearth); color: var(--on-hearth); }
 button.primary:disabled { opacity: 0.45; cursor: default; }
 
-/* a category whose rent is paid straight from the paycheck: shown, but out of the % budget */
-.cat.prepaid { opacity: 0.6; }
-.cat.prepaid .lock, .cat.prepaid input[type=range] { visibility: hidden; }
-.cat.prepaid input { pointer-events: none; }
+/* Housing fixed at its rent share (rent paid from the paycheck): shown pinned, not editable */
+.cat.rentfixed input { pointer-events: none; }
+.cat.rentfixed .lock { pointer-events: none; }
+table.tax tr.rent-lines td { color: var(--muted); }
+table.tax tr.rent-lines.deposit td { color: var(--text); font-weight: 700; }

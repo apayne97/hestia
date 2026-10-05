@@ -332,35 +332,44 @@ test("plan: the year being over (or no months left) returns ended instead of div
 
 // ---- rent paid from the paycheck -------------------------------------------------
 
-test("rent from the paycheck comes out after tax and shrinks take-home, without changing tax", () => {
+test("rent from the paycheck doesn't change take-home or tax; it only splits it into rent and what lands in the account", () => {
   const base = Tax.estimateTax({ salary: 90000 });
   const withRent = Tax.estimateTax({ salary: 90000, rentFromPaycheck: 1500 });
-  near(withRent.rent, 18000);
-  near(withRent.net, base.net - 18000);
+  near(withRent.net, base.net);
   near(withRent.totalTax, base.totalTax);
-  near(withRent.netMonthly, base.netMonthly - 1500);
+  near(withRent.rent, 18000);
+  near(withRent.deposit, base.net - 18000);
+  near(withRent.depositMonthly, base.netMonthly - 1500);
   assert.equal(base.rent, 0);
+  near(base.deposit, base.net);
 });
 
-test("rent from the paycheck can't take more than is left, and junk input is 0", () => {
+test("rent from the paycheck can't take more than take-home, and junk input counts as 0", () => {
   const t = Tax.estimateTax({ salary: 20000, rentFromPaycheck: 5000 });
-  assert.ok(t.net >= 0 && Number.isFinite(t.net));
-  near(t.net, 0);
+  assert.ok(t.deposit >= 0 && Number.isFinite(t.deposit));
+  near(t.rent, t.net);
   assert.equal(Tax.estimateTax({ salary: 90000, rentFromPaycheck: "abc" }).rent, 0);
   assert.equal(Tax.estimateTax({ salary: 90000, rentFromPaycheck: -200 }).rent, 0);
 });
 
-test("activeCategories drops Housing only when rent is paid from the paycheck", () => {
-  const D = Budget.DEFAULT_CATEGORIES;
-  assert.equal(Budget.activeCategories(D, { rentFromPaycheck: 0 }), D);
-  assert.equal(Budget.activeCategories(D, {}), D);
-  const active = Budget.activeCategories(D, { rentFromPaycheck: 1200 });
-  assert.equal(active.length, D.length - 1);
-  assert.equal(active.some((c) => c.id === Budget.RENT_CATEGORY_ID), false);
-  // a budget over the active categories still balances to 100
-  const p = Budget.applyPreset(Budget.DEFAULT_PRESET, active);
+test("rentShare: rent as a percent of take-home, capped and safe", () => {
+  near(Budget.rentShare(5000, 1500), 30);
+  assert.equal(Budget.rentShare(0, 1500), 0);
+  assert.equal(Budget.rentShare(5000, 0), 0);
+  assert.equal(Budget.rentShare(5000, "x"), 0);
+  assert.equal(Budget.rentShare(1000, 5000), 100);
+});
+
+test("a fixed Housing share plus normalize keeps the rest of the budget summing to 100", () => {
+  const share = Budget.rentShare(5000, 1500); // 30%
+  const start = { ...Budget.PRESETS[Budget.DEFAULT_PRESET], housing: share };
+  const p = Budget.normalize(start, { housing: true });
+  near(p.housing, 30);
   near(Object.values(p).reduce((a, b) => a + b, 0), 100, 1e-9);
-  assert.equal("housing" in p, false);
+  // rebalancing another category leaves the rent share alone
+  const r = Budget.rebalance(p, "dining", 20, { housing: true });
+  near(r.housing, 30);
+  near(Object.values(r).reduce((a, b) => a + b, 0), 100, 1e-9);
 });
 
 test("new scenarios default to no paycheck rent", () => {

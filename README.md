@@ -41,12 +41,13 @@ Work on `dev`; `main` is what GitHub Pages serves and is fast-forwarded from
 ## Rent paid from the paycheck
 
 If your rent is deducted before your pay reaches your account, set "Rent paid from
-paycheck ($/mo)" on a scenario. It comes out of take-home after tax (so take-home
-is what actually lands in the bank), Housing is left out of that scenario's
-percentage budget (it's already paid), and the budget-vs-actual comparison and the
-rest-of-year plan skip it too, matching a CSV in which you never pay rent. Rent is
-per scenario, so a different job can have it paid the usual way. Housing's stored
-percentage is kept, so setting the rent back to 0 restores a sensible share.
+paycheck ($/mo)" on a scenario. Percentages stay a share of the *full* take-home, so
+scenarios with and without paycheck rent compare like for like: Housing becomes a
+fixed row worth rent / take-home, the other categories share the rest, and the table
+adds "Rent (from paycheck)" and "Lands in your account" lines. In the budget-vs-actual
+comparison and the rest-of-year plan the rent counts as spent in Housing, even though a
+bank CSV never shows it. It's per scenario, so a different job can have it paid the
+usual way.
 
 ## Categories
 

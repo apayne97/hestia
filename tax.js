@@ -55,10 +55,12 @@ function marginalRate(taxableIncome, filing) {
 // dollars/month of pre-tax health premiums.
 //   401(k): reduces income-tax wages (federal + state) but NOT FICA wages.
 //   Health premiums (cafeteria plan): reduce income-tax AND FICA wages.
-//   Rent paid from the paycheck: taken out AFTER tax (it doesn't change the tax),
-//   capped at what's left, so take-home is what actually lands in the bank account.
-// Take-home is gross minus taxes minus those deductions, so the budget
-// percentages apply to what actually lands in the paycheck.
+//   Rent paid from the paycheck: taken out AFTER tax, so it doesn't change the tax.
+// Take-home (`net`) is gross minus taxes minus those pre-tax contributions, and it
+// is the base the budget percentages apply to. Rent deducted from the paycheck is
+// NOT subtracted from it, so scenarios with and without paycheck rent compare like
+// for like; `deposit` is what actually lands in the bank account (net minus rent,
+// the rent capped at what's left so it can never go negative).
 function estimateTax({ salary, filing = "single", stateRate = 0, pretax401kPct = 0, healthMonthly = 0, rentFromPaycheck = 0 }) {
   const gross = Math.max(0, Number(salary) || 0);
   const f = FEDERAL[filing] || FEDERAL.single;
@@ -73,11 +75,10 @@ function estimateTax({ salary, filing = "single", stateRate = 0, pretax401kPct =
   const medicare = ficaWages * MEDICARE_RATE + Math.max(0, ficaWages - f.addlMedicareThreshold) * ADDL_MEDICARE_RATE;
   const state = incomeTaxWages * ((Number(stateRate) || 0) / 100);
   const totalTax = federal + socialSecurity + medicare + state;
-  const afterOthers = gross - totalTax - k401 - health;
-  const rent = Math.min(Math.max(0, (Number(rentFromPaycheck) || 0) * 12), Math.max(0, afterOthers));
-  const net = afterOthers - rent;
+  const net = gross - totalTax - k401 - health;
+  const rent = Math.min(Math.max(0, (Number(rentFromPaycheck) || 0) * 12), Math.max(0, net));
   return {
-    gross, k401, health, rent, federal, socialSecurity, medicare, state, totalTax, net,
+    gross, k401, health, rent, deposit: net - rent, depositMonthly: (net - rent) / 12, federal, socialSecurity, medicare, state, totalTax, net,
     grossMonthly: gross / 12,
     netMonthly: net / 12,
     effectiveRate: gross > 0 ? totalTax / gross : 0,

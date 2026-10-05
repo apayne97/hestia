@@ -67,7 +67,7 @@ function loadScenarios() {
   try {
     const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY));
     // spread over fresh defaults so scenarios saved before a field existed still load
-    if (Array.isArray(parsed) && parsed.length) return parsed.map((s) => ({ ...Budget.createScenario(), ...s }));
+    if (Array.isArray(parsed) && parsed.length) return parsed.map((s) => enforceRent({ ...Budget.createScenario(), ...s }));
   } catch (e) { /* no storage, or corrupt — fall through to a fresh scenario */ }
   return [newScenario({ name: "Scenario 1" })];
 }
@@ -128,7 +128,7 @@ async function pushNow() {
 }
 
 function applyPull(remote) {
-  scenarios = remote.scenarios.map((s) => ({ ...Budget.createScenario(), ...s }));
+  scenarios = remote.scenarios.map((s) => enforceRent({ ...Budget.createScenario(), ...s }));
   if (remote.categories) categories = remote.categories; // a version-1 Drive file has none: keep ours
   if (remote.actuals !== undefined) actuals = remote.actuals; // undefined = an older file that predates actuals: keep ours
   lsSet(STORAGE_KEY, JSON.stringify(scenarios));
@@ -273,7 +273,7 @@ function buildCard(s) {
         </label>
       </div>
       <label>Rent paid from paycheck ($/mo)
-        <input type="number" min="0" step="50" data-field="rentFromPaycheck" title="If your rent is deducted before your pay reaches your account, enter it here. It comes out of take-home and out of the percentage budget.">
+        <input type="number" min="0" step="50" data-field="rentFromPaycheck" title="If your rent is deducted before your pay reaches your account, enter it here. It stays in the budget as a fixed Housing share of take-home, so this scenario still compares with ones where you pay rent yourself.">
       </label>
     </div>
     <table class="tax">
@@ -281,9 +281,11 @@ function buildCard(s) {
       <tbody>
         ${[["gross", "Gross pay"], ["federal", "Federal income tax"], ["socialSecurity", "Social Security"],
            ["medicare", "Medicare"], ["state", "State tax"],
-           ["k401", "401(k) contribution"], ["health", "Health premiums"], ["rent", "Rent (from paycheck)"]]
+           ["k401", "401(k) contribution"], ["health", "Health premiums"]]
           .map(([k, label]) => `<tr><td>${label}</td><td data-tax="${k}"></td><td data-tax-mo="${k}"></td><td data-tax-pay="${k}"></td></tr>`).join("")}
         <tr class="total"><td>Take-home</td><td data-tax="net"></td><td data-tax-mo="net"></td><td data-tax-pay="net"></td></tr>
+        <tr class="rent-lines hidden"><td>Rent (from paycheck)</td><td data-tax="rent"></td><td data-tax-mo="rent"></td><td data-tax-pay="rent"></td></tr>
+        <tr class="rent-lines deposit hidden"><td>Lands in your account</td><td data-tax="deposit"></td><td data-tax-mo="deposit"></td><td data-tax-pay="deposit"></td></tr>
       </tbody>
     </table>
     <p class="muted" data-out="effective"></p>
@@ -404,19 +406,22 @@ const UNLOCK_ICON = `<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden
 
 // While any category is locked the total is held at 100%, so Unallocated is
 // fixed at 0 too (shown with its own locked marker).
-// The categories this scenario budgets: all of them, except Housing when its rent
-// is paid straight from the paycheck (that rent is already out of take-home).
-const catsFor = (s) => Budget.activeCategories(categories, s);
-const hasLocks = (s) => catsFor(s).some((c) => s.locked[c.id]);
+function hasLocks(s) { return categories.some((c) => lockedFor(s)[c.id]); }
 
-// Replace a scenario's percentages with `next` (computed over `cats`), but keep the stored value of any category
-// that's currently left out — Housing while its rent is paid from the paycheck — so it comes back sensibly
-// if that rent is later set to 0.
-function setPercents(s, next, cats = catsFor(s)) {
-  const inCats = new Set(cats.map((c) => c.id));
-  const keep = {};
-  for (const c of categories) if (!inCats.has(c.id) && s.percents[c.id] !== undefined) keep[c.id] = s.percents[c.id];
-  s.percents = { ...keep, ...next };
+// Rent paid from the paycheck stays IN the percentage budget (so a scenario with it
+// compares like for like with one without): Housing becomes a fixed category worth
+// rent / take-home, behaving like a permanently pinned row, and the others share the rest.
+function rentActive(s) {
+  return categories.some((c) => c.id === Budget.RENT_CATEGORY_ID) && Tax.estimateTax(s).rent > 0;
+}
+function lockedFor(s) { return rentActive(s) ? { ...s.locked, [Budget.RENT_CATEGORY_ID]: true } : s.locked; }
+// Pin Housing to its rent share and let the other categories fill the remaining 100%. Idempotent; returns s.
+function enforceRent(s) {
+  if (!rentActive(s)) return s;
+  const t = Tax.estimateTax(s);
+  const withRent = { ...s.percents, [Budget.RENT_CATEGORY_ID]: Budget.rentShare(t.netMonthly, t.rent / 12) };
+  s.percents = Budget.normalize(withRent, lockedFor(s), categories);
+  return s;
 }
 
 const round = (n, places) => Number(n.toFixed(places));
@@ -427,17 +432,19 @@ function setText(card, selector, text) {
 }
 
 function refresh(card, s) {
+  enforceRent(s); // keep Housing pinned to its rent share whatever just changed (salary, taxes, ...)
   const t = Tax.estimateTax(s);
-  for (const k of ["gross", "federal", "socialSecurity", "medicare", "state", "k401", "health", "rent", "net"]) {
-    const sign = k === "gross" || k === "net" ? "" : "−";
+  for (const k of ["gross", "federal", "socialSecurity", "medicare", "state", "k401", "health", "net", "rent", "deposit"]) {
+    const sign = k === "gross" || k === "net" || k === "deposit" ? "" : "−";
     setText(card, `[data-tax="${k}"]`, sign + money.format(t[k]));
     setText(card, `[data-tax-mo="${k}"]`, sign + money.format(t[k] / 12));
     setText(card, `[data-tax-pay="${k}"]`, sign + money.format(t[k] / Budget.PAY_PERIODS_PER_YEAR));
   }
+  for (const row of card.querySelectorAll(".rent-lines")) row.classList.toggle("hidden", !(t.rent > 0));
   setText(card, '[data-out="effective"]',
     `Effective tax rate ${pctFmt.format(t.effectiveRate * 100)}% · top federal bracket ${pctFmt.format(t.marginalFederal * 100)}% (${Tax.TAX_YEAR} rates, estimate only)`);
 
-  const a = Budget.allocate(t.netMonthly, s.percents, catsFor(s));
+  const a = Budget.allocate(t.netMonthly, s.percents, categories);
   const dollar = viewMode === "dollar";
   // slider tracks whichever unit is being edited; dollar range scales with take-home
   const dollarMax = Math.max(50, Math.ceil((t.netMonthly * 0.6) / 50) * 50);
@@ -448,12 +455,12 @@ function refresh(card, s) {
     slider.step = dollar ? 5 : 1;
     const pctIn = row.querySelector('[data-role="pct"]');
     const amtIn = row.querySelector('[data-role="amt"]');
-    const locked = !!s.locked[r.id];
+    const locked = !!lockedFor(s)[r.id];
+    const rentRow = r.id === Budget.RENT_CATEGORY_ID && rentActive(s);
     row.classList.toggle("locked", locked);
-    row.classList.remove("prepaid");
-    row.removeAttribute("title");
-    slider.disabled = false;
-    pctIn.placeholder = "";
+    row.classList.toggle("rentfixed", rentRow);
+    row.title = rentRow ? "Fixed: this rent is paid straight from your paycheck" : "";
+    slider.disabled = rentRow;
     const lockBtn = row.querySelector(".lock");
     // only swap the icon when the state changes, so a refresh can't replace the <svg> between mousedown and mouseup
     if (lockBtn.dataset.state !== String(locked)) {
@@ -462,28 +469,12 @@ function refresh(card, s) {
     }
     lockBtn.setAttribute("aria-pressed", String(locked));
     // a locked ("pinned") category is only protected from auto-balancing; you can still edit it
-    pctIn.readOnly = dollar;
-    amtIn.readOnly = !dollar;
+    pctIn.readOnly = dollar || rentRow;
+    amtIn.readOnly = !dollar || rentRow;
     // never rewrite the field the user is typing in; update everything else
     if (document.activeElement !== slider) slider.value = dollar ? round(r.amount, 0) : round(r.pct, 1);
     if (document.activeElement !== pctIn) pctIn.value = round(r.pct, 1);
     if (document.activeElement !== amtIn) amtIn.value = round(r.amount, 0);
-  }
-  const activeIds = new Set(a.rows.map((r) => r.id));
-  for (const c of categories) {
-    if (activeIds.has(c.id)) continue;
-    const row = card.querySelector(`.cat[data-cat="${c.id}"]`);
-    if (!row) continue;
-    row.classList.add("prepaid");
-    row.title = "Paid straight from your paycheck, so it is already out of take-home";
-    const slider = row.querySelector('[data-role="slider"]'), pctIn = row.querySelector('[data-role="pct"]'), amtIn = row.querySelector('[data-role="amt"]');
-    slider.disabled = true;
-    slider.value = 0;
-    pctIn.value = "";
-    pctIn.placeholder = "—";
-    pctIn.readOnly = true;
-    amtIn.value = round(t.rent / 12, 0);
-    amtIn.readOnly = true;
   }
   const un = card.querySelector(".unalloc");
   const unPct = Math.abs(a.unallocatedPct) < 0.05 ? 0 : a.unallocatedPct;
@@ -533,13 +524,17 @@ function refreshCompare(card, s, t, a) {
   for (const btn of box.querySelectorAll("[data-compare]")) btn.setAttribute("aria-pressed", String(btn.dataset.compare === compareMode));
   box.classList.toggle("show-year", compareMode === "year");
   const months = actuals.months;
-  setText(card, '[data-out="rent-note"]', t.rent > 0
-    ? `Your ${money.format(t.rent / 12)}/mo rent comes straight out of your paycheck, so the take-home here is already after rent and Housing is left out of this comparison.` : "");
+  // rent deducted from the paycheck is real spending that never shows in a bank CSV: count it as spent in Housing
+  const spentTotals = { ...actuals.totals };
+  const rentOn = rentActive(s);
+  if (rentOn) spentTotals[Budget.RENT_CATEGORY_ID] = (t.rent / 12) * months;
+  setText(card, '[data-out="rent-note"]', rentOn
+    ? `Your ${money.format(t.rent / 12)}/mo rent is paid from your paycheck, so it counts as spent in Housing even though it isn't in your CSV.` : "");
   const when = actuals.start && actuals.end ? ` (${longDate(actuals.start)} – ${longDate(actuals.end)})` : "";
   setText(card, '[data-out="actuals-note"]', `Imported ${longDate((actuals.importedAt || "").slice(0, 10)) || "earlier"}: ${pctFmt.format(months)} months of spending${when}. Only totals are kept, never the transactions.`);
 
   // monthly average vs budget
-  const spentPerMonth = (id) => (actuals.totals[id] || 0) / months;
+  const spentPerMonth = (id) => (spentTotals[id] || 0) / months;
   let budgetSum = 0, actualSum = 0;
   const body = a.rows.map((r) => {
     const actual = spentPerMonth(r.id);
@@ -557,7 +552,7 @@ function refreshCompare(card, s, t, a) {
   const endMs = actuals.end ? Csv.fromIsoDate(actuals.end) : Date.now();
   const monthsLeft = Budget.monthsLeftInYear(endMs);
   const plan = Budget.planRestOfYear({
-    netMonthly: t.netMonthly, percents: s.percents, categories: catsFor(s), spent: actuals.totals, monthsCovered: months, monthsLeft,
+    netMonthly: t.netMonthly, percents: s.percents, categories, spent: spentTotals, monthsCovered: months, monthsLeft,
     received: s.ytdReceived, toCome: s.ytdToCome,
   });
   const recInput = box.querySelector('[data-field="ytdReceived"]');
@@ -743,13 +738,7 @@ root.addEventListener("input", (e) => {
   if ("catname" in e.target.dataset) { renameCategoryLive(e.target); return; }
   const s = find(card);
   const field = e.target.dataset.field;
-  if (field === "rentFromPaycheck") {
-    const total = (list) => list.reduce((sum, c) => sum + (Number(s.percents[c.id]) || 0), 0);
-    const wasFull = Math.abs(total(catsFor(s)) - 100) < 0.1;
-    s.rentFromPaycheck = Math.max(0, Number(e.target.value) || 0);
-    const after = catsFor(s);
-    if (wasFull && after.length) setPercents(s, Budget.normalize(s.percents, s.locked, after), after);
-  } else if (field === "ytdReceived" || field === "ytdToCome") {
+  if (field === "ytdReceived" || field === "ytdToCome") {
     s[field] = e.target.value === "" ? null : Number(e.target.value); // empty = estimate automatically
   } else if (field) {
     s[field] = e.target.type === "number" ? Number(e.target.value) : e.target.value;
@@ -760,9 +749,10 @@ root.addEventListener("input", (e) => {
     // convert whatever unit was edited into percent of take-home
     const inDollars = e.target.dataset.role === "amt" || (e.target.dataset.role === "slider" && viewMode === "dollar");
     const pct = Math.min(100, Math.max(0, inDollars ? (net > 0 ? (v / net) * 100 : 0) : v));
-    if (hasLocks(s)) setPercents(s, Budget.rebalance(s.percents, id, pct, s.locked, catsFor(s)));
+    if (hasLocks(s)) s.percents = Budget.rebalance(s.percents, id, pct, lockedFor(s), categories);
     else s.percents[id] = pct;
   } else return;
+  enforceRent(s);
   save();
   refresh(card, s);
 });
@@ -774,11 +764,9 @@ root.addEventListener("change", (e) => {
   }
   if (e.target.dataset.action !== "preset" || !e.target.value) return;
   const s = find(e.target.closest(".card"));
-  setPercents(s, Budget.applyPreset(e.target.value, catsFor(s)));
-  const full = Budget.applyPreset(e.target.value, categories); // a left-out category still gets the preset's share, ready for when it rejoins
-  const active = new Set(catsFor(s).map((c) => c.id));
-  for (const c of categories) if (!active.has(c.id)) s.percents[c.id] = full[c.id];
+  s.percents = Budget.applyPreset(e.target.value, categories);
   s.locked = {}; // a preset replaces every value, so old pins no longer mean anything
+  enforceRent(s);
   save();
   render();
 });
@@ -816,7 +804,8 @@ root.addEventListener("click", (e) => {
       // freed percent becomes Unallocated — unless something is pinned, which holds the total at 100%
       scenarios = scenarios.map((s) => {
         const t = Budget.dropCategory(s, id);
-        if (hasLocks(t)) setPercents(t, Budget.normalize(t.percents, t.locked, catsFor(t)));
+        if (hasLocks(t)) t.percents = Budget.normalize(t.percents, lockedFor(t), categories);
+        enforceRent(t);
         return t;
       });
     } else {
@@ -829,9 +818,9 @@ root.addEventListener("click", (e) => {
   if (action === "lock" && card) {
     const s = find(card);
     const id = e.target.closest(".cat[data-cat]").dataset.cat;
-    if (!catsFor(s).some((c) => c.id === id)) return; // a category paid from the paycheck can't be pinned
+    if (id === Budget.RENT_CATEGORY_ID && rentActive(s)) return; // fixed by the paycheck rent; can't be pinned or unpinned
     s.locked = { ...s.locked, [id]: !s.locked[id] };
-    if (hasLocks(s)) setPercents(s, Budget.normalize(s.percents, s.locked, catsFor(s))); // snap to 100% as soon as a lock holds the total
+    if (hasLocks(s)) s.percents = Budget.normalize(s.percents, lockedFor(s), categories); // snap to 100% as soon as a lock holds the total
     save();
     refresh(card, s);
     return;
