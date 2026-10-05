@@ -334,22 +334,22 @@ test("plan: the year being over (or no months left) returns ended instead of div
 
 test("rent from the paycheck doesn't change take-home or tax; it only splits it into rent and what lands in the account", () => {
   const base = Tax.estimateTax({ salary: 90000 });
-  const withRent = Tax.estimateTax({ salary: 90000, rentFromPaycheck: 1500 });
+  const withRent = Tax.estimateTax({ salary: 90000, rentPerPaycheck: 700 }); // 26 paychecks x $700 = $18,200
   near(withRent.net, base.net);
   near(withRent.totalTax, base.totalTax);
-  near(withRent.rent, 18000);
-  near(withRent.deposit, base.net - 18000);
-  near(withRent.depositMonthly, base.netMonthly - 1500);
+  near(withRent.rent, 18200);
+  near(withRent.deposit, base.net - 18200);
+  near(withRent.depositMonthly, base.netMonthly - 18200 / 12);
   assert.equal(base.rent, 0);
   near(base.deposit, base.net);
 });
 
 test("rent from the paycheck can't take more than take-home, and junk input counts as 0", () => {
-  const t = Tax.estimateTax({ salary: 20000, rentFromPaycheck: 5000 });
+  const t = Tax.estimateTax({ salary: 20000, rentPerPaycheck: 5000 });
   assert.ok(t.deposit >= 0 && Number.isFinite(t.deposit));
   near(t.rent, t.net);
-  assert.equal(Tax.estimateTax({ salary: 90000, rentFromPaycheck: "abc" }).rent, 0);
-  assert.equal(Tax.estimateTax({ salary: 90000, rentFromPaycheck: -200 }).rent, 0);
+  assert.equal(Tax.estimateTax({ salary: 90000, rentPerPaycheck: "abc" }).rent, 0);
+  assert.equal(Tax.estimateTax({ salary: 90000, rentPerPaycheck: -200 }).rent, 0);
 });
 
 test("rentShare: rent as a percent of take-home, capped and safe", () => {
@@ -373,5 +373,24 @@ test("a fixed Housing share plus normalize keeps the rest of the budget summing 
 });
 
 test("new scenarios default to no paycheck rent", () => {
-  assert.equal(Budget.createScenario().rentFromPaycheck, 0);
+  assert.equal(Budget.createScenario().rentPerPaycheck, 0);
+});
+
+test("rent is per paycheck (26 a year): its monthly equivalent is a bit more than 2 paychecks' worth", () => {
+  const t26 = Tax.estimateTax({ salary: 120000, rentPerPaycheck: 600 });
+  near(t26.rent, 15600);
+  near(t26.rent / 12, 1300);                       // 600 x 26 / 12
+  assert.equal(Tax.PAY_PERIODS_PER_YEAR, Budget.PAY_PERIODS_PER_YEAR); // the two modules must agree
+});
+
+test("migrateScenario converts a saved monthly rent to per paycheck and drops the old field", () => {
+  const out = Budget.migrateScenario({ name: "x", rentFromPaycheck: 1300 });
+  near(out.rentPerPaycheck, 600);
+  assert.equal("rentFromPaycheck" in out, false);
+  // an explicit new value wins; zero/absent old values just disappear; untouched scenarios pass through
+  assert.equal(Budget.migrateScenario({ rentFromPaycheck: 1300, rentPerPaycheck: 500 }).rentPerPaycheck, 500);
+  assert.equal("rentPerPaycheck" in Budget.migrateScenario({ rentFromPaycheck: 0 }), false);
+  const plain = { name: "y" };
+  assert.equal(Budget.migrateScenario(plain), plain);
+  assert.equal(Budget.migrateScenario(null), null);
 });

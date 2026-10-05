@@ -26,6 +26,9 @@ const FEDERAL = {
   },
 };
 
+// Biweekly pay: 26 paychecks a year.
+const PAY_PERIODS = 26;
+
 const FILING_LABELS = { single: "Single", married: "Married filing jointly", head: "Head of household" };
 
 const SOCIAL_SECURITY_RATE = 0.062;
@@ -55,13 +58,14 @@ function marginalRate(taxableIncome, filing) {
 // dollars/month of pre-tax health premiums.
 //   401(k): reduces income-tax wages (federal + state) but NOT FICA wages.
 //   Health premiums (cafeteria plan): reduce income-tax AND FICA wages.
-//   Rent paid from the paycheck: taken out AFTER tax, so it doesn't change the tax.
+//   Rent paid from the paycheck: a dollar amount per paycheck (biweekly, so 26 a year),
+//   taken out AFTER tax, so it doesn't change the tax.
 // Take-home (`net`) is gross minus taxes minus those pre-tax contributions, and it
 // is the base the budget percentages apply to. Rent deducted from the paycheck is
 // NOT subtracted from it, so scenarios with and without paycheck rent compare like
 // for like; `deposit` is what actually lands in the bank account (net minus rent,
 // the rent capped at what's left so it can never go negative).
-function estimateTax({ salary, filing = "single", stateRate = 0, pretax401kPct = 0, healthMonthly = 0, rentFromPaycheck = 0 }) {
+function estimateTax({ salary, filing = "single", stateRate = 0, pretax401kPct = 0, healthMonthly = 0, rentPerPaycheck = 0 }) {
   const gross = Math.max(0, Number(salary) || 0);
   const f = FEDERAL[filing] || FEDERAL.single;
   const bracketKey = filing in FEDERAL ? filing : "single";
@@ -76,7 +80,7 @@ function estimateTax({ salary, filing = "single", stateRate = 0, pretax401kPct =
   const state = incomeTaxWages * ((Number(stateRate) || 0) / 100);
   const totalTax = federal + socialSecurity + medicare + state;
   const net = gross - totalTax - k401 - health;
-  const rent = Math.min(Math.max(0, (Number(rentFromPaycheck) || 0) * 12), Math.max(0, net));
+  const rent = Math.min(Math.max(0, (Number(rentPerPaycheck) || 0) * PAY_PERIODS), Math.max(0, net));
   return {
     gross, k401, health, rent, deposit: net - rent, depositMonthly: (net - rent) / 12, federal, socialSecurity, medicare, state, totalTax, net,
     grossMonthly: gross / 12,
@@ -86,5 +90,5 @@ function estimateTax({ salary, filing = "single", stateRate = 0, pretax401kPct =
   };
 }
 
-const Tax = { TAX_YEAR, FEDERAL, FILING_LABELS, federalIncomeTax, estimateTax };
+const Tax = { TAX_YEAR, FEDERAL, FILING_LABELS, PAY_PERIODS_PER_YEAR: PAY_PERIODS, federalIncomeTax, estimateTax };
 if (typeof module !== "undefined" && module.exports) module.exports = Tax;

@@ -67,7 +67,7 @@ function loadScenarios() {
   try {
     const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY));
     // spread over fresh defaults so scenarios saved before a field existed still load
-    if (Array.isArray(parsed) && parsed.length) return parsed.map((s) => enforceRent({ ...Budget.createScenario(), ...s }));
+    if (Array.isArray(parsed) && parsed.length) return parsed.map((s) => enforceRent({ ...Budget.createScenario(), ...Budget.migrateScenario(s) }));
   } catch (e) { /* no storage, or corrupt — fall through to a fresh scenario */ }
   return [newScenario({ name: "Scenario 1" })];
 }
@@ -128,7 +128,7 @@ async function pushNow() {
 }
 
 function applyPull(remote) {
-  scenarios = remote.scenarios.map((s) => enforceRent({ ...Budget.createScenario(), ...s }));
+  scenarios = remote.scenarios.map((s) => enforceRent({ ...Budget.createScenario(), ...Budget.migrateScenario(s) }));
   if (remote.categories) categories = remote.categories; // a version-1 Drive file has none: keep ours
   if (remote.actuals !== undefined) actuals = remote.actuals; // undefined = an older file that predates actuals: keep ours
   lsSet(STORAGE_KEY, JSON.stringify(scenarios));
@@ -272,8 +272,8 @@ function buildCard(s) {
           <input type="number" min="0" step="10" data-field="healthMonthly">
         </label>
       </div>
-      <label>Rent paid from paycheck ($/mo)
-        <input type="number" min="0" step="50" data-field="rentFromPaycheck" title="If your rent is deducted before your pay reaches your account, enter it here. It stays in the budget as a fixed Housing share of take-home, so this scenario still compares with ones where you pay rent yourself.">
+      <label>Rent taken from each paycheck ($)
+        <input type="number" min="0" step="10" data-field="rentPerPaycheck" title="If your rent is deducted from every (biweekly) paycheck before your pay reaches your account, enter that amount here. It stays in the budget as a fixed Housing share of take-home, so this scenario still compares with ones where you pay rent yourself.">
       </label>
     </div>
     <table class="tax">
@@ -355,7 +355,7 @@ function buildCard(s) {
   card.querySelector('[data-field="stateRate"]').value = s.stateRate;
   card.querySelector('[data-field="pretax401kPct"]').value = s.pretax401kPct;
   card.querySelector('[data-field="healthMonthly"]').value = s.healthMonthly;
-  card.querySelector('[data-field="rentFromPaycheck"]').value = s.rentFromPaycheck || 0;
+  card.querySelector('[data-field="rentPerPaycheck"]').value = s.rentPerPaycheck || 0;
   card.querySelector('[data-field="ytdReceived"]').value = s.ytdReceived ?? "";
   card.querySelector('[data-field="ytdToCome"]').value = s.ytdToCome ?? "";
   const unalloc = card.querySelector(".unalloc");
@@ -492,7 +492,7 @@ function refresh(card, s) {
   const rent = Budget.rentRules(t.gross);
   const housing = a.rows.find((r) => r.id === "housing"); // the user may have deleted the Housing category
   setText(card, '[data-rent="slice"]',
-    t.rent > 0 ? `${money.format(t.rent / 12)}/mo (from your paycheck)` : housing ? money.format(housing.amount) + "/mo" : "—");
+    t.rent > 0 ? `${money.format(t.rent / 12)}/mo (${money.format(t.rent / Tax.PAY_PERIODS_PER_YEAR)} per paycheck, from your paycheck)` : housing ? money.format(housing.amount) + "/mo" : "—");
   setText(card, '[data-rent="thirty"]', money.format(rent.thirtyPercent) + "/mo");
   setText(card, '[data-rent="forty"]', money.format(rent.fortyX) + "/mo");
 }
@@ -529,7 +529,7 @@ function refreshCompare(card, s, t, a) {
   const rentOn = rentActive(s);
   if (rentOn) spentTotals[Budget.RENT_CATEGORY_ID] = (t.rent / 12) * months;
   setText(card, '[data-out="rent-note"]', rentOn
-    ? `Your ${money.format(t.rent / 12)}/mo rent is paid from your paycheck, so it counts as spent in Housing even though it isn't in your CSV.` : "");
+    ? `Your rent (${money.format(t.rent / Tax.PAY_PERIODS_PER_YEAR)} per paycheck, ${money.format(t.rent / 12)}/mo) is paid from your paycheck, so it counts as spent in Housing even though it isn't in your CSV.` : "");
   const when = actuals.start && actuals.end ? ` (${longDate(actuals.start)} – ${longDate(actuals.end)})` : "";
   setText(card, '[data-out="actuals-note"]', `Imported ${longDate((actuals.importedAt || "").slice(0, 10)) || "earlier"}: ${pctFmt.format(months)} months of spending${when}. Only totals are kept, never the transactions.`);
 

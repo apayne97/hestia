@@ -44,7 +44,7 @@ function createScenario(overrides = {}) {
     stateRate: 0,
     pretax401kPct: 0,
     healthMonthly: 0,
-    rentFromPaycheck: 0, // $/month of rent deducted from the paycheck before it lands; Housing becomes a fixed category worth this much of take-home
+    rentPerPaycheck: 0, // $ per (biweekly) paycheck of rent deducted before the pay lands; Housing becomes a fixed category worth this much of take-home
     ytdReceived: null, // take-home received so far in the imported period; null = estimate from monthly take-home x months covered
     ytdToCome: null,   // take-home still to come before year end; null = estimate from monthly take-home x months left
     locked: {}, // "pinned" category ids: auto-balancing never moves them (you can still edit them yourself). While any category is pinned, the total is held at 100%.
@@ -65,6 +65,16 @@ function rentShare(netMonthly, rentMonthly) {
   const net = Number(netMonthly) || 0;
   const rent = Number(rentMonthly) || 0;
   return net > 0 && rent > 0 ? Math.min(100, (rent / net) * 100) : 0;
+}
+
+// Scenarios saved while rent was entered as dollars per MONTH (rentFromPaycheck) → per paycheck.
+function migrateScenario(raw) {
+  if (!raw || !("rentFromPaycheck" in raw)) return raw;
+  const { rentFromPaycheck, ...rest } = raw;
+  if (rest.rentPerPaycheck === undefined && Number(rentFromPaycheck) > 0) {
+    rest.rentPerPaycheck = Math.round(((Number(rentFromPaycheck) * 12) / PAY_PERIODS_PER_YEAR) * 100) / 100;
+  }
+  return rest;
 }
 
 // ---- categories --------------------------------------------------------------
@@ -253,7 +263,7 @@ function rentRules(grossAnnual) {
 
 const Budget = {
   PAY_PERIODS_PER_YEAR, DEFAULT_CATEGORIES, PRESETS, DEFAULT_PRESET,
-  RENT_CATEGORY_ID, rentShare, createScenario, applyPreset, addCategory, renameCategory, moveCategory, removeCategory, dropCategory, cleanCategories,
+  RENT_CATEGORY_ID, rentShare, migrateScenario, createScenario, applyPreset, addCategory, renameCategory, moveCategory, removeCategory, dropCategory, cleanCategories,
   allocate, rebalance, normalize, rentRules, monthsLeftInYear, planRestOfYear,
 };
 if (typeof module !== "undefined" && module.exports) module.exports = Budget;

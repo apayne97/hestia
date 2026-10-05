@@ -40,8 +40,8 @@ Work on `dev`; `main` is what GitHub Pages serves and is fast-forwarded from
 
 ## Rent paid from the paycheck
 
-If your rent is deducted before your pay reaches your account, set "Rent paid from
-paycheck ($/mo)" on a scenario. Percentages stay a share of the *full* take-home, so
+If your rent is deducted before your pay reaches your account, set "Rent taken from
+each paycheck ($)" on a scenario (biweekly: 26 paychecks a year). Percentages stay a share of the *full* take-home, so
 scenarios with and without paycheck rent compare like for like: Housing becomes a
 fixed row worth rent / take-home, the other categories share the rest, and the table
 adds "Rent (from paycheck)" and "Lands in your account" lines. In the budget-vs-actual
