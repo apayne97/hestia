@@ -85,3 +85,19 @@ table.tax .total td { border-top: 1px solid var(--border); font-weight: 700; pad
 .cat-head .view-toggle { grid-column: 3 / span 2; justify-self: end; }
 .view-toggle button { padding: 2px 8px; font-size: 12px; }
 table.tax th, table.tax td:not(:first-child) { padding-left: 8px; }
+
+/* category rows: label cell is a flex row so the pin, name and edit controls line up */
+.cat-label { display: flex; align-items: center; min-width: 0; }
+.cat-name { overflow-wrap: anywhere; }
+.cat-name-input { display: none; flex: 1; min-width: 0; padding: 3px 6px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: var(--text); }
+.cat-ctrls, .cat-add { display: none; }
+.cat-ctrls button, .cat-add button { padding: 2px 7px; font-size: 12px; }
+.cat-ctrls { gap: 4px; margin-left: 6px; }
+button[aria-pressed=true]#editCats { background: var(--hearth); border-color: var(--hearth); color: var(--on-hearth); }
+/* "Edit categories" mode: hide the numbers, show rename / move / delete */
+.scenarios.editing .cat[data-cat] { grid-template-columns: 1fr; }
+.scenarios.editing .cat[data-cat] > :not(.cat-label), .scenarios.editing .cat-head, .scenarios.editing .unalloc { display: none; }
+.scenarios.editing .cat[data-cat] .lock, .scenarios.editing .cat-name { display: none; }
+.scenarios.editing .cat-name-input { display: block; }
+.scenarios.editing .cat-ctrls { display: inline-flex; }
+.scenarios.editing .cat-add { display: block; margin-top: 4px; }

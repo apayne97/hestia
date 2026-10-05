@@ -38,7 +38,7 @@ test("estimateTax: zero or junk salary yields zero tax, not NaN", () => {
 
 test("every preset sums to exactly 100% and covers every category", () => {
   for (const [name, p] of Object.entries(Budget.PRESETS)) {
-    assert.deepEqual(Object.keys(p).sort(), Budget.CATEGORIES.map((c) => c.id).sort(), name);
+    assert.deepEqual(Object.keys(p).sort(), Budget.DEFAULT_CATEGORIES.map((c) => c.id).sort(), name);
     assert.equal(Object.values(p).reduce((a, b) => a + b, 0), 100, name);
   }
 });
@@ -95,9 +95,9 @@ test("rebalance: changed category is set and the rest rescale to total 100", () 
 });
 
 test("rebalance: clamps to 0-100 and splits evenly when the others are all zero", () => {
-  const zeros = Object.fromEntries(Budget.CATEGORIES.map((c) => [c.id, 0]));
+  const zeros = Object.fromEntries(Budget.DEFAULT_CATEGORIES.map((c) => [c.id, 0]));
   const p = Budget.rebalance(zeros, "housing", 30);
-  near(p.groceries, 70 / (Budget.CATEGORIES.length - 1)); // the remainder split evenly among the others
+  near(p.groceries, 70 / (Budget.DEFAULT_CATEGORIES.length - 1)); // the remainder split evenly among the others
   near(Budget.rebalance(zeros, "housing", 250).housing, 100);
   near(Object.values(Budget.rebalance(zeros, "housing", -5)).reduce((a, b) => a + b, 0), 100, 1e-9);
 });
@@ -127,11 +127,11 @@ test("rebalance with locks: value is capped to what the locked categories leave"
 });
 
 test("rebalance with locks: if everything else is locked, the changed category takes the remainder", () => {
-  const locked = Object.fromEntries(Budget.CATEGORIES.filter((c) => c.id !== "dining" && c.id !== "shopping").map((c) => [c.id, true]));
+  const locked = Object.fromEntries(Budget.DEFAULT_CATEGORIES.filter((c) => c.id !== "dining" && c.id !== "shopping").map((c) => [c.id, true]));
   const p = Budget.rebalance(Budget.PRESETS[Budget.DEFAULT_PRESET], "dining", 5, locked);
   near(p.dining + p.shopping, 20); // 100 minus everything locked (25+5+10+5+5+10+20)
   near(p.dining, 5);
-  const onlyOne = Object.fromEntries(Budget.CATEGORIES.filter((c) => c.id !== "dining").map((c) => [c.id, true]));
+  const onlyOne = Object.fromEntries(Budget.DEFAULT_CATEGORIES.filter((c) => c.id !== "dining").map((c) => [c.id, true]));
   near(Budget.rebalance(Budget.PRESETS[Budget.DEFAULT_PRESET], "dining", 5, onlyOne).dining, 10); // 100 minus the other eight (90)
 });
 
@@ -143,7 +143,7 @@ test("normalize with locks keeps locked values and scales the rest", () => {
 });
 
 test("normalize with every category locked returns them unchanged (no NaN)", () => {
-  const all = Object.fromEntries(Budget.CATEGORIES.map((c) => [c.id, true]));
+  const all = Object.fromEntries(Budget.DEFAULT_CATEGORIES.map((c) => [c.id, true]));
   const p = Budget.normalize(Budget.PRESETS[Budget.DEFAULT_PRESET], all);
   assert.deepEqual(p, Budget.PRESETS[Budget.DEFAULT_PRESET]);
 });
@@ -172,7 +172,7 @@ test("rebalance: a locked category's edit is still capped by the other locked on
 });
 
 test("donations: a category defaulting to 10% of take-home in every preset and new scenarios", () => {
-  assert.ok(Budget.CATEGORIES.some((c) => c.id === "donations"));
+  assert.ok(Budget.DEFAULT_CATEGORIES.some((c) => c.id === "donations"));
   for (const [name, p] of Object.entries(Budget.PRESETS)) assert.equal(p.donations, 10, name);
   const s = Budget.createScenario();
   assert.equal(s.percents.donations, 10);
@@ -186,4 +186,85 @@ test("scenarios saved before donations existed total <100% rather than breaking"
   const a = Budget.allocate(5000, old);
   near(a.unallocatedPct, 10);
   near(a.rows.find((r) => r.id === "donations").pct, 0);
+});
+
+// ---- editable categories -----------------------------------------------------
+
+const D = Budget.DEFAULT_CATEGORIES;
+
+test("addCategory appends a uniquely-id'd category with a trimmed label", () => {
+  let cats = Budget.addCategory(D, "  Pets  ");
+  cats = Budget.addCategory(cats, "Pets");
+  assert.equal(cats.length, D.length + 2);
+  assert.equal(cats[D.length].label, "Pets");
+  assert.notEqual(cats[D.length].id, cats[D.length + 1].id);
+  assert.equal(Budget.addCategory(D, "   ").at(-1).label, "New category");
+  assert.equal(D.length, 9); // the input wasn't mutated
+});
+
+test("renameCategory / moveCategory / removeCategory return new lists and leave the input alone", () => {
+  const renamed = Budget.renameCategory(D, "housing", "Rent");
+  assert.equal(renamed[0].label, "Rent");
+  assert.equal(D[0].label, "Housing (rent)");
+  const down = Budget.moveCategory(D, "housing", +1);
+  assert.deepEqual(down.slice(0, 2).map((c) => c.id), ["utilities", "housing"]);
+  assert.equal(Budget.moveCategory(D, "housing", -1), D); // already first: unchanged
+  assert.equal(Budget.moveCategory(D, "savings", +1), D); // already last
+  assert.equal(Budget.moveCategory(D, "nope", +1), D);
+  assert.equal(Budget.removeCategory(D, "groceries").some((c) => c.id === "groceries"), false);
+  assert.equal(D.length, 9);
+});
+
+test("dropCategory removes a category's percent and lock from a scenario", () => {
+  const s = Budget.createScenario({ locked: { groceries: true, savings: true } });
+  const out = Budget.dropCategory(s, "groceries");
+  assert.equal("groceries" in out.percents, false);
+  assert.equal("groceries" in out.locked, false);
+  assert.equal(out.locked.savings, true);
+  assert.equal(s.percents.groceries, 10); // original untouched
+});
+
+test("allocate / rebalance / normalize work over a custom category list", () => {
+  const cats = [{ id: "rent", label: "Rent" }, { id: "pets", label: "Pets" }, { id: "fun", label: "Fun" }];
+  const a = Budget.allocate(1000, { rent: 50, pets: 10 }, cats);
+  assert.deepEqual(a.rows.map((r) => r.label), ["Rent", "Pets", "Fun"]);
+  near(a.unallocatedPct, 40);
+  const r = Budget.rebalance({ rent: 50, pets: 10, fun: 40 }, "pets", 30, { rent: true }, cats);
+  near(r.rent, 50); near(r.pets, 30); near(r.fun, 20);
+  const n = Budget.normalize({ rent: 30, pets: 10, fun: 10 }, { rent: true }, cats);
+  near(n.rent, 30); near(n.pets + n.fun, 70);
+});
+
+test("a category with no stored percent counts as 0, so a freshly added one doesn't disturb totals", () => {
+  const cats = Budget.addCategory(D, "Pets");
+  const a = Budget.allocate(5000, Budget.PRESETS[Budget.DEFAULT_PRESET], cats);
+  near(a.unallocatedPct, 0);
+  assert.equal(a.rows.at(-1).pct, 0);
+});
+
+test("applyPreset adapts to the current categories and still totals 100", () => {
+  const sum = (o) => Object.values(o).reduce((x, y) => x + y, 0);
+  near(sum(Budget.applyPreset(Budget.DEFAULT_PRESET, D)), 100, 1e-9);
+  assert.deepEqual(Budget.applyPreset(Budget.DEFAULT_PRESET, D), Budget.PRESETS[Budget.DEFAULT_PRESET]);
+  // delete shopping (10%): the other categories scale up to fill 100
+  const noShopping = Budget.removeCategory(D, "shopping");
+  const p = Budget.applyPreset(Budget.DEFAULT_PRESET, noShopping);
+  near(sum(p), 100, 1e-9);
+  assert.equal("shopping" in p, false);
+  assert.ok(p.housing > 25);
+  // a custom category starts at 0 under a preset
+  const withPets = Budget.addCategory(D, "Pets");
+  near(Budget.applyPreset(Budget.DEFAULT_PRESET, withPets)[withPets.at(-1).id], 0);
+  // only custom categories: even split rather than NaN
+  const only = Budget.addCategory([], "A");
+  near(Budget.applyPreset(Budget.DEFAULT_PRESET, only)[only[0].id], 100);
+  assert.deepEqual(Budget.applyPreset(Budget.DEFAULT_PRESET, []), {});
+});
+
+test("cleanCategories validates stored data", () => {
+  assert.equal(Budget.cleanCategories("x"), null);
+  assert.equal(Budget.cleanCategories(null), null);
+  assert.deepEqual(Budget.cleanCategories([]), []);
+  assert.deepEqual(Budget.cleanCategories([{ id: "a", label: "A" }, { id: "a" }, { label: "x" }, { id: "b" }]),
+    [{ id: "a", label: "A" }, { id: "b", label: "b" }]);
 });

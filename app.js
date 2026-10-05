@@ -1,8 +1,10 @@
 // Hestia UI: a row of scenario cards, each with salary → take-home →
 // percentage sliders → dollar amounts. State lives in localStorage; typing
 // patches the outputs in place (so inputs keep focus), and structural
-// changes (add / delete / duplicate / preset) rebuild the cards.
+// changes (add / delete / duplicate / preset / category edits) rebuild the cards.
+// Categories (the budget's rows) are shared by every scenario and editable.
 const STORAGE_KEY = "hestia-scenarios-v1";
+const CATS_KEY = "hestia-categories-v1";
 const money = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 const pctFmt = new Intl.NumberFormat("en-US", { maximumFractionDigits: 1 });
 
@@ -33,8 +35,23 @@ const VIEW_KEY = "hestia-view";
 let viewMode = "percent"; // "percent" | "dollar": which column of each category row is editable
 try { if (localStorage.getItem(VIEW_KEY) === "dollar") viewMode = "dollar"; } catch (e) { /* ignore */ }
 
+let categories = loadCategories();
+let editingCats = false; // "Edit categories" mode: rows show rename / move / delete instead of the numbers
 let scenarios = loadScenarios();
 const root = document.getElementById("scenarios");
+
+function loadCategories() {
+  try {
+    const cats = Budget.cleanCategories(JSON.parse(localStorage.getItem(CATS_KEY)));
+    if (cats) return cats;
+  } catch (e) { /* no storage, or corrupt — fall through to the defaults */ }
+  return Budget.DEFAULT_CATEGORIES.map((c) => ({ ...c }));
+}
+
+// A scenario whose percentages start from the default preset over the CURRENT categories.
+function newScenario(overrides = {}) {
+  return Budget.createScenario({ percents: Budget.applyPreset(Budget.DEFAULT_PRESET, categories), ...overrides });
+}
 
 function loadScenarios() {
   try {
@@ -42,13 +59,16 @@ function loadScenarios() {
     // spread over fresh defaults so scenarios saved before a field existed still load
     if (Array.isArray(parsed) && parsed.length) return parsed.map((s) => ({ ...Budget.createScenario(), ...s }));
   } catch (e) { /* no storage, or corrupt — fall through to a fresh scenario */ }
-  return [Budget.createScenario({ name: "Scenario 1" })];
+  return [newScenario({ name: "Scenario 1" })];
 }
 
 const localUpdatedAt = () => Number(lsGet(LS.updated)) || 0;
 
 function save() {
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(scenarios)); } catch (e) { /* private mode etc */ }
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(scenarios));
+    localStorage.setItem(CATS_KEY, JSON.stringify(categories));
+  } catch (e) { /* private mode etc */ }
   lsSet(LS.updated, String(Date.now()));
   schedulePush();
 }
@@ -88,7 +108,7 @@ async function pushNow() {
   if (!stamp) { stamp = Date.now(); lsSet(LS.updated, String(stamp)); }
   renderDriveUI("Saving to Drive…");
   try {
-    await drive.write(driveFileId, serializeState({ scenarios, updatedAt: stamp }));
+    await drive.write(driveFileId, serializeState({ scenarios, categories, updatedAt: stamp }));
     lsSet(LS.synced, String(stamp));
     lastSyncAt = new Date();
     renderDriveUI();
@@ -97,7 +117,9 @@ async function pushNow() {
 
 function applyPull(remote) {
   scenarios = remote.scenarios.map((s) => ({ ...Budget.createScenario(), ...s }));
+  if (remote.categories) categories = remote.categories; // a version-1 Drive file has none: keep ours
   lsSet(STORAGE_KEY, JSON.stringify(scenarios));
+  lsSet(CATS_KEY, JSON.stringify(categories));
   lsSet(LS.updated, String(remote.updatedAt));
   lsSet(LS.synced, String(remote.updatedAt));
   render();
@@ -261,17 +283,11 @@ function buildCard(s) {
         <span class="seg view-toggle" role="group" aria-label="Edit budget in">
           <button type="button" data-view="percent">% of pay</button><button type="button" data-view="dollar">$ / month</button>
         </span></div>
-      ${Budget.CATEGORIES.map((c) => `
-        <div class="cat" data-cat="${c.id}">
-          <span class="cat-label"><button type="button" class="lock" data-action="lock" aria-label="Pin ${c.label}" title="Pin: auto-balancing won't change this category (you can still edit it yourself)"></button>${c.label}</span>
-          <input type="range" min="0" max="60" step="1" data-role="slider" aria-label="${c.label} slider">
-          <input type="number" min="0" max="100" step="0.5" data-role="pct" aria-label="${c.label} percent">
-          <input type="number" min="0" step="10" data-role="amt" aria-label="${c.label} dollars per month">
-        </div>`).join("")}
       <div class="cat unalloc">
         <span class="cat-label"><span class="lock lock-static" title="Total is held at 100% while any category is pinned"></span>Unallocated</span><span></span>
         <span data-role="pct"></span><span data-role="amt"></span>
       </div>
+      <div class="cat-add"><button type="button" data-action="cat-add">＋ Add category</button></div>
     </div>
     <div class="rent">
       <h3>What rent can you afford?</h3>
@@ -286,8 +302,45 @@ function buildCard(s) {
   card.querySelector('[data-field="stateRate"]').value = s.stateRate;
   card.querySelector('[data-field="pretax401kPct"]').value = s.pretax401kPct;
   card.querySelector('[data-field="healthMonthly"]').value = s.healthMonthly;
+  const unalloc = card.querySelector(".unalloc");
+  for (const c of categories) unalloc.before(buildCatRow(c));
   refresh(card, s);
   return card;
+}
+
+// One budget row. The label is user text, so it goes in via textContent/value,
+// never innerHTML.
+function buildCatRow(c) {
+  const row = document.createElement("div");
+  row.className = "cat";
+  row.dataset.cat = c.id;
+  row.innerHTML = `
+    <span class="cat-label">
+      <button type="button" class="lock" data-action="lock" title="Pin: auto-balancing won't change this category (you can still edit it yourself)"></button>
+      <span class="cat-name"></span>
+      <input class="cat-name-input" data-catname aria-label="Category name" maxlength="40">
+      <span class="cat-ctrls">
+        <button type="button" data-action="cat-up" title="Move up" aria-label="Move up">▲</button>
+        <button type="button" data-action="cat-down" title="Move down" aria-label="Move down">▼</button>
+        <button type="button" data-action="cat-delete" title="Delete category" aria-label="Delete category">✕</button>
+      </span>
+    </span>
+    <input type="range" min="0" max="60" step="1" data-role="slider">
+    <input type="number" min="0" max="100" step="0.5" data-role="pct">
+    <input type="number" min="0" step="10" data-role="amt">`;
+  setCatLabel(row, c.label);
+  return row;
+}
+
+// Everything that shows (or is named after) a category's label.
+function setCatLabel(row, label) {
+  row.querySelector(".cat-name").textContent = label;
+  const input = row.querySelector(".cat-name-input");
+  if (document.activeElement !== input) input.value = label;
+  row.querySelector(".lock").setAttribute("aria-label", `Pin ${label}`);
+  row.querySelector('[data-role="slider"]').setAttribute("aria-label", `${label} slider`);
+  row.querySelector('[data-role="pct"]').setAttribute("aria-label", `${label} percent`);
+  row.querySelector('[data-role="amt"]').setAttribute("aria-label", `${label} dollars per month`);
 }
 
 // Padlock icons (currentColor, so CSS controls the color). Locked = shackle
@@ -317,7 +370,7 @@ function refresh(card, s) {
   setText(card, '[data-out="effective"]',
     `Effective tax rate ${pctFmt.format(t.effectiveRate * 100)}% · top federal bracket ${pctFmt.format(t.marginalFederal * 100)}% (${Tax.TAX_YEAR} rates, estimate only)`);
 
-  const a = Budget.allocate(t.netMonthly, s.percents);
+  const a = Budget.allocate(t.netMonthly, s.percents, categories);
   const dollar = viewMode === "dollar";
   // slider tracks whichever unit is being edited; dollar range scales with take-home
   const dollarMax = Math.max(50, Math.ceil((t.netMonthly * 0.6) / 50) * 50);
@@ -357,9 +410,19 @@ function refresh(card, s) {
   marker.classList.toggle("on", fixed);
 
   const rent = Budget.rentRules(t.gross);
-  setText(card, '[data-rent="slice"]', money.format(a.rows.find((r) => r.id === "housing").amount) + "/mo");
+  const housing = a.rows.find((r) => r.id === "housing"); // the user may have deleted the Housing category
+  setText(card, '[data-rent="slice"]', housing ? money.format(housing.amount) + "/mo" : "—");
   setText(card, '[data-rent="thirty"]', money.format(rent.thirtyPercent) + "/mo");
   setText(card, '[data-rent="forty"]', money.format(rent.fortyX) + "/mo");
+}
+
+// Typing in a category's name box: relabel it everywhere (it's shared by all scenarios) without
+// rebuilding anything, so the input keeps focus.
+function renameCategoryLive(input) {
+  const id = input.closest(".cat[data-cat]").dataset.cat;
+  categories = Budget.renameCategory(categories, id, input.value);
+  for (const row of root.querySelectorAll(`.cat[data-cat="${id}"]`)) setCatLabel(row, input.value);
+  save();
 }
 
 function render() {
@@ -372,6 +435,7 @@ const find = (card) => scenarios.find((s) => s.id === card.dataset.id);
 root.addEventListener("input", (e) => {
   const card = e.target.closest(".card");
   if (!card) return;
+  if ("catname" in e.target.dataset) { renameCategoryLive(e.target); return; }
   const s = find(card);
   const field = e.target.dataset.field;
   if (field) {
@@ -383,7 +447,7 @@ root.addEventListener("input", (e) => {
     // convert whatever unit was edited into percent of take-home
     const inDollars = e.target.dataset.role === "amt" || (e.target.dataset.role === "slider" && viewMode === "dollar");
     const pct = Math.min(100, Math.max(0, inDollars ? (net > 0 ? (v / net) * 100 : 0) : v));
-    if (hasLocks(s)) s.percents = Budget.rebalance(s.percents, id, pct, s.locked);
+    if (hasLocks(s)) s.percents = Budget.rebalance(s.percents, id, pct, s.locked, categories);
     else s.percents[id] = pct;
   } else return;
   save();
@@ -391,9 +455,14 @@ root.addEventListener("input", (e) => {
 });
 
 root.addEventListener("change", (e) => {
+  if ("catname" in e.target.dataset) { // leaving a name box empty would leave an unlabeled row
+    if (!e.target.value.trim()) { e.target.value = "Untitled"; renameCategoryLive(e.target); }
+    return;
+  }
   if (e.target.dataset.action !== "preset" || !e.target.value) return;
   const s = find(e.target.closest(".card"));
-  s.percents = { ...Budget.PRESETS[e.target.value] };
+  s.percents = Budget.applyPreset(e.target.value, categories);
+  s.locked = {}; // a preset replaces every value, so old pins no longer mean anything
   save();
   render();
 });
@@ -402,11 +471,41 @@ root.addEventListener("click", (e) => {
   const actionEl = e.target.closest("[data-action]"); // a click on the icon's <svg> must still count
   const action = actionEl && actionEl.dataset.action;
   const card = e.target.closest(".card");
+  if (action === "cat-add") {
+    categories = Budget.addCategory(categories);
+    const newId = categories[categories.length - 1].id;
+    const cardIndex = [...root.children].indexOf(card);
+    save();
+    render();
+    const input = root.children[cardIndex].querySelector(`.cat[data-cat="${newId}"] .cat-name-input`);
+    input.focus();
+    input.select();
+    return;
+  }
+  if (action === "cat-up" || action === "cat-down" || action === "cat-delete") {
+    const id = e.target.closest(".cat[data-cat]").dataset.cat;
+    if (action === "cat-delete") {
+      const label = (categories.find((c) => c.id === id) || {}).label || "this category";
+      if (!confirm(`Delete “${label}”? Its percentages are removed from every scenario.`)) return;
+      categories = Budget.removeCategory(categories, id);
+      // freed percent becomes Unallocated — unless something is pinned, which holds the total at 100%
+      scenarios = scenarios.map((s) => {
+        const t = Budget.dropCategory(s, id);
+        if (hasLocks(t)) t.percents = Budget.normalize(t.percents, t.locked, categories);
+        return t;
+      });
+    } else {
+      categories = Budget.moveCategory(categories, id, action === "cat-up" ? -1 : +1);
+    }
+    save();
+    render();
+    return;
+  }
   if (action === "lock" && card) {
     const s = find(card);
     const id = e.target.closest(".cat[data-cat]").dataset.cat;
     s.locked = { ...s.locked, [id]: !s.locked[id] };
-    if (hasLocks(s)) s.percents = Budget.normalize(s.percents, s.locked); // snap to 100% as soon as a lock holds the total
+    if (hasLocks(s)) s.percents = Budget.normalize(s.percents, s.locked, categories); // snap to 100% as soon as a lock holds the total
     save();
     refresh(card, s);
     return;
@@ -427,9 +526,17 @@ root.addEventListener("click", (e) => {
 });
 
 document.getElementById("addScenario").addEventListener("click", () => {
-  scenarios.push(Budget.createScenario({ name: `Scenario ${scenarios.length + 1}` }));
+  scenarios.push(newScenario({ name: `Scenario ${scenarios.length + 1}` }));
   save();
   render();
+});
+
+const editBtn = document.getElementById("editCats");
+editBtn.addEventListener("click", () => {
+  editingCats = !editingCats;
+  root.classList.toggle("editing", editingCats);
+  editBtn.setAttribute("aria-pressed", String(editingCats));
+  editBtn.textContent = editingCats ? "Done editing" : "Edit categories";
 });
 
 function setView(mode) {

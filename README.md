@@ -38,4 +38,13 @@ key's **HTTP referrer** restrictions need `https://hestia.apayne.org` (and
 Work on `dev`; `main` is what GitHub Pages serves and is fast-forwarded from
 `dev` once CI passes (branch protection requires the `test` check).
 
-Roadmap: editable categories, mobile layout.
+## Categories
+
+The budget rows are editable: "Edit categories" lets you add, rename, reorder
+and delete them (built-in ones included). They're shared by every scenario so
+side-by-side comparisons always line up, and they sync to Drive with the
+scenarios (file format version 2; older version-1 files still load). Deleting a
+category removes its percentage from every scenario; presets adapt to whatever
+categories exist.
+
+Roadmap: mobile layout.
