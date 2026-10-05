@@ -143,3 +143,8 @@ dialog h2 { margin: 0 0 6px; font-size: 18px; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
 button.primary { background: var(--hearth); border-color: var(--hearth); color: var(--on-hearth); }
 button.primary:disabled { opacity: 0.45; cursor: default; }
+
+/* a category whose rent is paid straight from the paycheck: shown, but out of the % budget */
+.cat.prepaid { opacity: 0.6; }
+.cat.prepaid .lock, .cat.prepaid input[type=range] { visibility: hidden; }
+.cat.prepaid input { pointer-events: none; }

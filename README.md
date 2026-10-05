@@ -38,6 +38,16 @@ key's **HTTP referrer** restrictions need `https://hestia.apayne.org` (and
 Work on `dev`; `main` is what GitHub Pages serves and is fast-forwarded from
 `dev` once CI passes (branch protection requires the `test` check).
 
+## Rent paid from the paycheck
+
+If your rent is deducted before your pay reaches your account, set "Rent paid from
+paycheck ($/mo)" on a scenario. It comes out of take-home after tax (so take-home
+is what actually lands in the bank), Housing is left out of that scenario's
+percentage budget (it's already paid), and the budget-vs-actual comparison and the
+rest-of-year plan skip it too, matching a CSV in which you never pay rent. Rent is
+per scenario, so a different job can have it paid the usual way. Housing's stored
+percentage is kept, so setting the rent back to 0 restores a sensible share.
+
 ## Categories
 
 The budget rows are editable: "Edit categories" lets you add, rename, reorder

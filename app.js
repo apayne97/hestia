@@ -272,13 +272,16 @@ function buildCard(s) {
           <input type="number" min="0" step="10" data-field="healthMonthly">
         </label>
       </div>
+      <label>Rent paid from paycheck ($/mo)
+        <input type="number" min="0" step="50" data-field="rentFromPaycheck" title="If your rent is deducted before your pay reaches your account, enter it here. It comes out of take-home and out of the percentage budget.">
+      </label>
     </div>
     <table class="tax">
       <thead><tr><th></th><th>Year</th><th>Month</th><th title="Biweekly: year ÷ 26">Paycheck</th></tr></thead>
       <tbody>
         ${[["gross", "Gross pay"], ["federal", "Federal income tax"], ["socialSecurity", "Social Security"],
            ["medicare", "Medicare"], ["state", "State tax"],
-           ["k401", "401(k) contribution"], ["health", "Health premiums"]]
+           ["k401", "401(k) contribution"], ["health", "Health premiums"], ["rent", "Rent (from paycheck)"]]
           .map(([k, label]) => `<tr><td>${label}</td><td data-tax="${k}"></td><td data-tax-mo="${k}"></td><td data-tax-pay="${k}"></td></tr>`).join("")}
         <tr class="total"><td>Take-home</td><td data-tax="net"></td><td data-tax-mo="net"></td><td data-tax-pay="net"></td></tr>
       </tbody>
@@ -332,6 +335,7 @@ function buildCard(s) {
         </table>
         <p class="muted" data-out="ytd-summary"></p>
       </div>
+      <p class="muted" data-out="rent-note"></p>
       <p class="muted compare-foot"><span data-out="actuals-note"></span>
         <button type="button" data-action="import-open">Re-import</button>
         <button type="button" data-action="actuals-clear">Clear</button></p>
@@ -349,6 +353,7 @@ function buildCard(s) {
   card.querySelector('[data-field="stateRate"]').value = s.stateRate;
   card.querySelector('[data-field="pretax401kPct"]').value = s.pretax401kPct;
   card.querySelector('[data-field="healthMonthly"]').value = s.healthMonthly;
+  card.querySelector('[data-field="rentFromPaycheck"]').value = s.rentFromPaycheck || 0;
   card.querySelector('[data-field="ytdReceived"]').value = s.ytdReceived ?? "";
   card.querySelector('[data-field="ytdToCome"]').value = s.ytdToCome ?? "";
   const unalloc = card.querySelector(".unalloc");
@@ -399,7 +404,20 @@ const UNLOCK_ICON = `<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden
 
 // While any category is locked the total is held at 100%, so Unallocated is
 // fixed at 0 too (shown with its own locked marker).
-const hasLocks = (s) => Object.values(s.locked).some(Boolean);
+// The categories this scenario budgets: all of them, except Housing when its rent
+// is paid straight from the paycheck (that rent is already out of take-home).
+const catsFor = (s) => Budget.activeCategories(categories, s);
+const hasLocks = (s) => catsFor(s).some((c) => s.locked[c.id]);
+
+// Replace a scenario's percentages with `next` (computed over `cats`), but keep the stored value of any category
+// that's currently left out — Housing while its rent is paid from the paycheck — so it comes back sensibly
+// if that rent is later set to 0.
+function setPercents(s, next, cats = catsFor(s)) {
+  const inCats = new Set(cats.map((c) => c.id));
+  const keep = {};
+  for (const c of categories) if (!inCats.has(c.id) && s.percents[c.id] !== undefined) keep[c.id] = s.percents[c.id];
+  s.percents = { ...keep, ...next };
+}
 
 const round = (n, places) => Number(n.toFixed(places));
 
@@ -410,7 +428,7 @@ function setText(card, selector, text) {
 
 function refresh(card, s) {
   const t = Tax.estimateTax(s);
-  for (const k of ["gross", "federal", "socialSecurity", "medicare", "state", "k401", "health", "net"]) {
+  for (const k of ["gross", "federal", "socialSecurity", "medicare", "state", "k401", "health", "rent", "net"]) {
     const sign = k === "gross" || k === "net" ? "" : "−";
     setText(card, `[data-tax="${k}"]`, sign + money.format(t[k]));
     setText(card, `[data-tax-mo="${k}"]`, sign + money.format(t[k] / 12));
@@ -419,7 +437,7 @@ function refresh(card, s) {
   setText(card, '[data-out="effective"]',
     `Effective tax rate ${pctFmt.format(t.effectiveRate * 100)}% · top federal bracket ${pctFmt.format(t.marginalFederal * 100)}% (${Tax.TAX_YEAR} rates, estimate only)`);
 
-  const a = Budget.allocate(t.netMonthly, s.percents, categories);
+  const a = Budget.allocate(t.netMonthly, s.percents, catsFor(s));
   const dollar = viewMode === "dollar";
   // slider tracks whichever unit is being edited; dollar range scales with take-home
   const dollarMax = Math.max(50, Math.ceil((t.netMonthly * 0.6) / 50) * 50);
@@ -432,6 +450,10 @@ function refresh(card, s) {
     const amtIn = row.querySelector('[data-role="amt"]');
     const locked = !!s.locked[r.id];
     row.classList.toggle("locked", locked);
+    row.classList.remove("prepaid");
+    row.removeAttribute("title");
+    slider.disabled = false;
+    pctIn.placeholder = "";
     const lockBtn = row.querySelector(".lock");
     // only swap the icon when the state changes, so a refresh can't replace the <svg> between mousedown and mouseup
     if (lockBtn.dataset.state !== String(locked)) {
@@ -446,6 +468,22 @@ function refresh(card, s) {
     if (document.activeElement !== slider) slider.value = dollar ? round(r.amount, 0) : round(r.pct, 1);
     if (document.activeElement !== pctIn) pctIn.value = round(r.pct, 1);
     if (document.activeElement !== amtIn) amtIn.value = round(r.amount, 0);
+  }
+  const activeIds = new Set(a.rows.map((r) => r.id));
+  for (const c of categories) {
+    if (activeIds.has(c.id)) continue;
+    const row = card.querySelector(`.cat[data-cat="${c.id}"]`);
+    if (!row) continue;
+    row.classList.add("prepaid");
+    row.title = "Paid straight from your paycheck, so it is already out of take-home";
+    const slider = row.querySelector('[data-role="slider"]'), pctIn = row.querySelector('[data-role="pct"]'), amtIn = row.querySelector('[data-role="amt"]');
+    slider.disabled = true;
+    slider.value = 0;
+    pctIn.value = "";
+    pctIn.placeholder = "—";
+    pctIn.readOnly = true;
+    amtIn.value = round(t.rent / 12, 0);
+    amtIn.readOnly = true;
   }
   const un = card.querySelector(".unalloc");
   const unPct = Math.abs(a.unallocatedPct) < 0.05 ? 0 : a.unallocatedPct;
@@ -462,7 +500,8 @@ function refresh(card, s) {
 
   const rent = Budget.rentRules(t.gross);
   const housing = a.rows.find((r) => r.id === "housing"); // the user may have deleted the Housing category
-  setText(card, '[data-rent="slice"]', housing ? money.format(housing.amount) + "/mo" : "—");
+  setText(card, '[data-rent="slice"]',
+    t.rent > 0 ? `${money.format(t.rent / 12)}/mo (from your paycheck)` : housing ? money.format(housing.amount) + "/mo" : "—");
   setText(card, '[data-rent="thirty"]', money.format(rent.thirtyPercent) + "/mo");
   setText(card, '[data-rent="forty"]', money.format(rent.fortyX) + "/mo");
 }
@@ -478,6 +517,7 @@ function renameCategoryLive(input) {
 
 // ---- budget vs. actual -----------------------------------------------------------
 
+const nearZero = (n) => (Math.abs(n) < 0.5 ? 0 : n); // so a rounding crumb never prints as "-$0"
 const signed = (n) => (Math.abs(n) < 0.5 ? money.format(0) : (n > 0 ? "+" : "−") + money.format(Math.abs(n)));
 const longDate = (iso) => (iso ? new Date(iso + "T00:00:00Z").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" }) : null);
 
@@ -493,6 +533,8 @@ function refreshCompare(card, s, t, a) {
   for (const btn of box.querySelectorAll("[data-compare]")) btn.setAttribute("aria-pressed", String(btn.dataset.compare === compareMode));
   box.classList.toggle("show-year", compareMode === "year");
   const months = actuals.months;
+  setText(card, '[data-out="rent-note"]', t.rent > 0
+    ? `Your ${money.format(t.rent / 12)}/mo rent comes straight out of your paycheck, so the take-home here is already after rent and Housing is left out of this comparison.` : "");
   const when = actuals.start && actuals.end ? ` (${longDate(actuals.start)} – ${longDate(actuals.end)})` : "";
   setText(card, '[data-out="actuals-note"]', `Imported ${longDate((actuals.importedAt || "").slice(0, 10)) || "earlier"}: ${pctFmt.format(months)} months of spending${when}. Only totals are kept, never the transactions.`);
 
@@ -509,13 +551,13 @@ function refreshCompare(card, s, t, a) {
   box.querySelector(".compare-avg tbody").innerHTML = body;
   box.querySelector(".compare-avg tfoot").innerHTML =
     rowHtml([{ text: "Total spending" }, { text: money.format(budgetSum) }, { text: money.format(actualSum) }, { text: signed(actualSum - budgetSum) }], "total") +
-    rowHtml([{ text: "Left of take-home" }, { text: money.format(t.netMonthly - budgetSum) }, { text: money.format(t.netMonthly - actualSum) }, { text: "" }]);
+    rowHtml([{ text: "Left of take-home" }, { text: money.format(nearZero(t.netMonthly - budgetSum)) }, { text: money.format(nearZero(t.netMonthly - actualSum)) }, { text: "" }]);
 
   // rest of year
   const endMs = actuals.end ? Csv.fromIsoDate(actuals.end) : Date.now();
   const monthsLeft = Budget.monthsLeftInYear(endMs);
   const plan = Budget.planRestOfYear({
-    netMonthly: t.netMonthly, percents: s.percents, categories, spent: actuals.totals, monthsCovered: months, monthsLeft,
+    netMonthly: t.netMonthly, percents: s.percents, categories: catsFor(s), spent: actuals.totals, monthsCovered: months, monthsLeft,
     received: s.ytdReceived, toCome: s.ytdToCome,
   });
   const recInput = box.querySelector('[data-field="ytdReceived"]');
@@ -701,7 +743,13 @@ root.addEventListener("input", (e) => {
   if ("catname" in e.target.dataset) { renameCategoryLive(e.target); return; }
   const s = find(card);
   const field = e.target.dataset.field;
-  if (field === "ytdReceived" || field === "ytdToCome") {
+  if (field === "rentFromPaycheck") {
+    const total = (list) => list.reduce((sum, c) => sum + (Number(s.percents[c.id]) || 0), 0);
+    const wasFull = Math.abs(total(catsFor(s)) - 100) < 0.1;
+    s.rentFromPaycheck = Math.max(0, Number(e.target.value) || 0);
+    const after = catsFor(s);
+    if (wasFull && after.length) setPercents(s, Budget.normalize(s.percents, s.locked, after), after);
+  } else if (field === "ytdReceived" || field === "ytdToCome") {
     s[field] = e.target.value === "" ? null : Number(e.target.value); // empty = estimate automatically
   } else if (field) {
     s[field] = e.target.type === "number" ? Number(e.target.value) : e.target.value;
@@ -712,7 +760,7 @@ root.addEventListener("input", (e) => {
     // convert whatever unit was edited into percent of take-home
     const inDollars = e.target.dataset.role === "amt" || (e.target.dataset.role === "slider" && viewMode === "dollar");
     const pct = Math.min(100, Math.max(0, inDollars ? (net > 0 ? (v / net) * 100 : 0) : v));
-    if (hasLocks(s)) s.percents = Budget.rebalance(s.percents, id, pct, s.locked, categories);
+    if (hasLocks(s)) setPercents(s, Budget.rebalance(s.percents, id, pct, s.locked, catsFor(s)));
     else s.percents[id] = pct;
   } else return;
   save();
@@ -726,7 +774,10 @@ root.addEventListener("change", (e) => {
   }
   if (e.target.dataset.action !== "preset" || !e.target.value) return;
   const s = find(e.target.closest(".card"));
-  s.percents = Budget.applyPreset(e.target.value, categories);
+  setPercents(s, Budget.applyPreset(e.target.value, catsFor(s)));
+  const full = Budget.applyPreset(e.target.value, categories); // a left-out category still gets the preset's share, ready for when it rejoins
+  const active = new Set(catsFor(s).map((c) => c.id));
+  for (const c of categories) if (!active.has(c.id)) s.percents[c.id] = full[c.id];
   s.locked = {}; // a preset replaces every value, so old pins no longer mean anything
   save();
   render();
@@ -765,7 +816,7 @@ root.addEventListener("click", (e) => {
       // freed percent becomes Unallocated — unless something is pinned, which holds the total at 100%
       scenarios = scenarios.map((s) => {
         const t = Budget.dropCategory(s, id);
-        if (hasLocks(t)) t.percents = Budget.normalize(t.percents, t.locked, categories);
+        if (hasLocks(t)) setPercents(t, Budget.normalize(t.percents, t.locked, catsFor(t)));
         return t;
       });
     } else {
@@ -778,8 +829,9 @@ root.addEventListener("click", (e) => {
   if (action === "lock" && card) {
     const s = find(card);
     const id = e.target.closest(".cat[data-cat]").dataset.cat;
+    if (!catsFor(s).some((c) => c.id === id)) return; // a category paid from the paycheck can't be pinned
     s.locked = { ...s.locked, [id]: !s.locked[id] };
-    if (hasLocks(s)) s.percents = Budget.normalize(s.percents, s.locked, categories); // snap to 100% as soon as a lock holds the total
+    if (hasLocks(s)) setPercents(s, Budget.normalize(s.percents, s.locked, catsFor(s))); // snap to 100% as soon as a lock holds the total
     save();
     refresh(card, s);
     return;

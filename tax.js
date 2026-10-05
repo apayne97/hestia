@@ -55,9 +55,11 @@ function marginalRate(taxableIncome, filing) {
 // dollars/month of pre-tax health premiums.
 //   401(k): reduces income-tax wages (federal + state) but NOT FICA wages.
 //   Health premiums (cafeteria plan): reduce income-tax AND FICA wages.
-// Take-home is gross minus taxes minus both contributions, so the budget
+//   Rent paid from the paycheck: taken out AFTER tax (it doesn't change the tax),
+//   capped at what's left, so take-home is what actually lands in the bank account.
+// Take-home is gross minus taxes minus those deductions, so the budget
 // percentages apply to what actually lands in the paycheck.
-function estimateTax({ salary, filing = "single", stateRate = 0, pretax401kPct = 0, healthMonthly = 0 }) {
+function estimateTax({ salary, filing = "single", stateRate = 0, pretax401kPct = 0, healthMonthly = 0, rentFromPaycheck = 0 }) {
   const gross = Math.max(0, Number(salary) || 0);
   const f = FEDERAL[filing] || FEDERAL.single;
   const bracketKey = filing in FEDERAL ? filing : "single";
@@ -71,9 +73,11 @@ function estimateTax({ salary, filing = "single", stateRate = 0, pretax401kPct =
   const medicare = ficaWages * MEDICARE_RATE + Math.max(0, ficaWages - f.addlMedicareThreshold) * ADDL_MEDICARE_RATE;
   const state = incomeTaxWages * ((Number(stateRate) || 0) / 100);
   const totalTax = federal + socialSecurity + medicare + state;
-  const net = gross - totalTax - k401 - health;
+  const afterOthers = gross - totalTax - k401 - health;
+  const rent = Math.min(Math.max(0, (Number(rentFromPaycheck) || 0) * 12), Math.max(0, afterOthers));
+  const net = afterOthers - rent;
   return {
-    gross, k401, health, federal, socialSecurity, medicare, state, totalTax, net,
+    gross, k401, health, rent, federal, socialSecurity, medicare, state, totalTax, net,
     grossMonthly: gross / 12,
     netMonthly: net / 12,
     effectiveRate: gross > 0 ? totalTax / gross : 0,

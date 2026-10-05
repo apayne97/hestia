@@ -44,12 +44,27 @@ function createScenario(overrides = {}) {
     stateRate: 0,
     pretax401kPct: 0,
     healthMonthly: 0,
+    rentFromPaycheck: 0, // $/month of rent deducted from the paycheck before it lands: out of take-home, and out of the % budget
     ytdReceived: null, // take-home received so far in the imported period; null = estimate from monthly take-home x months covered
     ytdToCome: null,   // take-home still to come before year end; null = estimate from monthly take-home x months left
     locked: {}, // "pinned" category ids: auto-balancing never moves them (you can still edit them yourself). While any category is pinned, the total is held at 100%.
     percents: { ...PRESETS[DEFAULT_PRESET] },
     ...overrides,
   };
+}
+
+// ---- rent from the paycheck ---------------------------------------------------
+
+// The category that rent lives in. When a scenario's rent comes straight out of
+// the paycheck (rentFromPaycheck > 0) it is already paid before the money reaches
+// the account, so that category is left out of the scenario's percentage budget.
+const RENT_CATEGORY_ID = "housing";
+
+// The categories a scenario actually budgets: all of them, minus the rent
+// category when the scenario's rent is paid from the paycheck.
+function activeCategories(categories, scenario) {
+  if (!(Number(scenario.rentFromPaycheck) > 0)) return categories;
+  return categories.filter((c) => c.id !== RENT_CATEGORY_ID);
 }
 
 // ---- categories --------------------------------------------------------------
@@ -238,7 +253,7 @@ function rentRules(grossAnnual) {
 
 const Budget = {
   PAY_PERIODS_PER_YEAR, DEFAULT_CATEGORIES, PRESETS, DEFAULT_PRESET,
-  createScenario, applyPreset, addCategory, renameCategory, moveCategory, removeCategory, dropCategory, cleanCategories,
+  RENT_CATEGORY_ID, activeCategories, createScenario, applyPreset, addCategory, renameCategory, moveCategory, removeCategory, dropCategory, cleanCategories,
   allocate, rebalance, normalize, rentRules, monthsLeftInYear, planRestOfYear,
 };
 if (typeof module !== "undefined" && module.exports) module.exports = Budget;

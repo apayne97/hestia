@@ -329,3 +329,40 @@ test("plan: the year being over (or no months left) returns ended instead of div
   assert.deepEqual(plan({ spent: {}, monthsLeft: 0 }), { ended: true });
   assert.deepEqual(plan({ spent: {}, monthsLeft: 0.04 }), { ended: true });
 });
+
+// ---- rent paid from the paycheck -------------------------------------------------
+
+test("rent from the paycheck comes out after tax and shrinks take-home, without changing tax", () => {
+  const base = Tax.estimateTax({ salary: 90000 });
+  const withRent = Tax.estimateTax({ salary: 90000, rentFromPaycheck: 1500 });
+  near(withRent.rent, 18000);
+  near(withRent.net, base.net - 18000);
+  near(withRent.totalTax, base.totalTax);
+  near(withRent.netMonthly, base.netMonthly - 1500);
+  assert.equal(base.rent, 0);
+});
+
+test("rent from the paycheck can't take more than is left, and junk input is 0", () => {
+  const t = Tax.estimateTax({ salary: 20000, rentFromPaycheck: 5000 });
+  assert.ok(t.net >= 0 && Number.isFinite(t.net));
+  near(t.net, 0);
+  assert.equal(Tax.estimateTax({ salary: 90000, rentFromPaycheck: "abc" }).rent, 0);
+  assert.equal(Tax.estimateTax({ salary: 90000, rentFromPaycheck: -200 }).rent, 0);
+});
+
+test("activeCategories drops Housing only when rent is paid from the paycheck", () => {
+  const D = Budget.DEFAULT_CATEGORIES;
+  assert.equal(Budget.activeCategories(D, { rentFromPaycheck: 0 }), D);
+  assert.equal(Budget.activeCategories(D, {}), D);
+  const active = Budget.activeCategories(D, { rentFromPaycheck: 1200 });
+  assert.equal(active.length, D.length - 1);
+  assert.equal(active.some((c) => c.id === Budget.RENT_CATEGORY_ID), false);
+  // a budget over the active categories still balances to 100
+  const p = Budget.applyPreset(Budget.DEFAULT_PRESET, active);
+  near(Object.values(p).reduce((a, b) => a + b, 0), 100, 1e-9);
+  assert.equal("housing" in p, false);
+});
+
+test("new scenarios default to no paycheck rent", () => {
+  assert.equal(Budget.createScenario().rentFromPaycheck, 0);
+});
